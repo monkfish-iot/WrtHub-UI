@@ -1,0 +1,397 @@
+{{define "content"}}
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <h5 class="mb-0"><i class="fas fa-cog me-1"></i> 设备配置 · {{.Device.DeviceName}}</h5>
+    <div class="d-flex gap-1">
+        <a href="/devices/{{.Device.DeviceID}}" class="btn btn-outline-secondary btn-sm"><i class="fas fa-arrow-left"></i> 返回详情</a>
+        <a href="/devices" class="btn btn-outline-secondary btn-sm"><i class="fas fa-list"></i> 设备列表</a>
+    </div>
+</div>
+
+{{if .Error}}
+<div class="alert alert-warning py-2 small mb-2"><i class="fas fa-exclamation-triangle me-1"></i> {{.Error}}</div>
+{{end}}
+{{if .FlashOK}}
+<div class="alert alert-success py-2 small mb-2"><i class="fas fa-check-circle me-1"></i> {{.FlashOK}}</div>
+{{end}}
+{{if .FlashErr}}
+<div class="alert alert-danger py-2 small mb-2"><i class="fas fa-times-circle me-1"></i> {{.FlashErr}}</div>
+{{end}}
+
+<ul class="nav nav-tabs mb-2" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-lan" type="button" role="tab"><i class="fas fa-home me-1"></i> LAN <span class="badge bg-secondary">{{len .LAN}}</span></button>
+    </li>
+    {{if .WAN}}
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-wan" type="button" role="tab"><i class="fas fa-globe me-1"></i> WAN <span class="badge bg-secondary">{{len .WAN}}</span></button>
+    </li>
+    {{end}}
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-wireless" type="button" role="tab"><i class="fas fa-wifi me-1"></i> 无线 <span class="badge bg-secondary">{{if .Wireless}}{{len .Wireless.Radios}}{{end}}</span></button>
+    </li>
+</ul>
+
+<div class="tab-content">
+    <div class="tab-pane fade show active" id="tab-lan" role="tabpanel">
+        <div class="card shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center bg-white py-2">
+                <span class="small fw-semibold"><i class="fas fa-home me-1"></i> LAN 配置（uci get config=network）</span>
+                {{if .WAN}}
+                <button class="btn btn-outline-primary btn-sm" disabled title="编辑功能开发中"><i class="fas fa-edit me-1"></i> 编辑</button>
+                {{else}}
+                <span class="badge bg-warning text-dark" title="设备处于桥模式（无 WAN 口），远程场景下不提供网络配置修改，避免失联">桥模式 · 只读</span>
+                {{end}}
+            </div>
+            <div class="card-body p-2">
+                {{if .LAN}}{{template "ucicards" .LAN}}{{else}}<div class="text-muted small py-3 text-center">无数据（设备离线或调用失败）</div>{{end}}
+            </div>
+        </div>
+    </div>
+
+    {{if .WAN}}
+    <div class="tab-pane fade" id="tab-wan" role="tabpanel">
+        <div class="card shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center bg-white py-2">
+                <span class="small fw-semibold"><i class="fas fa-globe me-1"></i> WAN 配置（只读）</span>
+                <span class="badge bg-secondary" title="远程修改 WAN 可能导致失联，WAN 永不提供配置">只读</span>
+            </div>
+            <div class="card-body p-2">
+                {{template "ucicards" .WAN}}
+            </div>
+        </div>
+    </div>
+    {{end}}
+
+    <div class="tab-pane fade" id="tab-wireless" role="tabpanel">
+        {{if .Wireless}}
+            {{range $r := .Wireless.Radios}}
+            <div class="card shadow-sm mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center bg-white py-2">
+                    <span class="small fw-semibold">
+                        <i class="fas fa-broadcast-tower me-1"></i> {{$r.Section}}
+                        <span class="badge bg-info text-dark">{{$r.BandText}}</span>
+                        {{if $r.Up}}<span class="badge bg-success">up</span>{{else}}<span class="badge bg-secondary">down</span>{{end}}
+                        {{if $r.Disabled}}<span class="badge bg-dark">disabled</span>{{end}}
+                        {{if $r.HWName}}<span class="text-muted ms-2">{{$r.HWName}}</span>{{end}}
+                    </span>
+                    <button class="btn btn-outline-primary btn-sm" data-bs-toggle="collapse" data-bs-target="#edit-{{$r.Section}}" aria-expanded="false" aria-controls="edit-{{$r.Section}}"><i class="fas fa-edit me-1"></i> 编辑</button>
+                </div>
+                <div class="card-body p-2">
+                    <div class="collapse mb-2" id="edit-{{$r.Section}}">
+                        <form method="post" action="/devices/{{$.Device.DeviceID}}/config/wireless/radio" class="border rounded p-2 bg-light"
+                              onsubmit="return saveRadio(this);">
+                            <input type="hidden" name="radio" value="{{$r.Section}}">
+                            <div class="row g-2 small">
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label mb-0">国家</label>
+                                    <select name="country" class="form-select form-select-sm">
+                                        {{range $r.CountryOpts}}<option value="{{.}}" {{if eq . $r.Country}}selected{{end}}>{{.}}</option>{{end}}
+                                    </select>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label mb-0">信道</label>
+                                    <select name="channel" class="form-select form-select-sm">
+                                        {{range $r.ChannelOpts}}<option value="{{.}}" {{if eq . $r.Channel}}selected{{end}}>{{.}}</option>{{end}}
+                                    </select>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label mb-0">无线模式</label>
+                                    <select name="mode" class="form-select form-select-sm" data-radio="{{$r.Section}}" data-widths='{{$r.WidthsJSON}}' onchange="onModeChange(this)">
+                                        {{$r.ModeOptionsHTML}}
+                                    </select>
+                                    <div class="text-muted" style="font-size:.72rem;" title="设备硬件支持的频宽模式（只读）">支持：{{if $r.HWModes}}{{$r.HWModes}}{{else}}—{{end}}</div>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label mb-0">频宽</label>
+                                    <select name="width" id="width-{{$r.Section}}" class="form-select form-select-sm" data-cur="{{$r.Width}}"
+                                            onchange="this.setAttribute('data-cur', this.value)"
+                                            {{if or (eq $r.Mode "") (eq $r.Mode "NOHT") (not $r.CurWidths)}}disabled{{end}}>
+                                        {{range $r.CurWidths}}<option value="{{.}}" {{if eq . $r.Width}}selected{{end}}>{{.}} MHz</option>{{end}}
+                                    </select>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label mb-0">发射功率</label>
+                                    <select name="txpower" class="form-select form-select-sm">
+                                        {{range $r.TxpowerOpts}}<option value="{{.}}" {{if eq . $r.Txpower}}selected{{end}}>{{if .}}{{.}} dBm{{else}}默认（最大）{{end}}</option>{{end}}
+                                    </select>
+                                </div>
+                                <div class="col-12">
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="checkbox" name="disabled" value="1" id="dis-{{$r.Section}}" {{if $r.Disabled}}checked{{end}}>
+                                        <label class="form-check-label" for="dis-{{$r.Section}}">禁用此网卡</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-2">
+                                <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-paper-plane me-1"></i> 应用修改</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#edit-{{$r.Section}}">取消</button>
+                            </div>
+                        </form>
+                    </div>
+                    <table class="table table-sm mb-2 small">
+                        <tbody>
+                        <tr><th class="table-light" style="width:140px;">国家</th><td>{{$r.Country}}</td></tr>
+                        <tr><th class="table-light">信道</th><td>{{$r.Channel}}</td></tr>
+                        <tr><th class="table-light">频宽</th><td>{{$r.Htmode}}</td></tr>
+                        <tr><th class="table-light">发射功率</th><td>{{if $r.Txpower}}{{$r.Txpower}} dBm{{else}}默认（最大）{{end}}</td></tr>
+                        <tr><th class="table-light">实时频率</th><td>{{if $r.Frequency}}{{$r.Frequency}} MHz{{else}}—{{end}}</td></tr>
+                        <tr><th class="table-light">支持频宽模式</th><td>{{if $r.HWModes}}{{$r.HWModes}}{{else}}—{{end}}</td></tr>
+                        </tbody>
+                    </table>
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="small fw-semibold">SSID 列表</span>
+                        <button class="btn btn-outline-success btn-sm" data-bs-toggle="collapse" data-bs-target="#add-ssid-{{$r.Section}}" aria-expanded="false" aria-controls="add-ssid-{{$r.Section}}"><i class="fas fa-plus me-1"></i> 新增SSID</button>
+                    </div>
+                    <div class="collapse mb-2" id="add-ssid-{{$r.Section}}">
+                        <form method="post" action="/devices/{{$.Device.DeviceID}}/config/wireless/ssid" class="border rounded p-2 bg-light"
+                              onsubmit="return saveSSID(this);">
+                            <input type="hidden" name="radio" value="{{$r.Section}}">
+                            <div class="row g-2 small">
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label mb-0">SSID 名称</label>
+                                    <input name="ssid" class="form-control form-control-sm" maxlength="32" required placeholder="1-32 字节">
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label mb-0">加密</label>
+                                    <select name="encryption" class="form-select form-select-sm" data-key="key-add-{{$r.Section}}" onchange="onEncChange(this)">
+                                        {{$.Wireless.EncOptionsHTML}}
+                                    </select>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label mb-0">密码</label>
+                                    <input type="password" name="key" id="key-add-{{$r.Section}}" class="form-control form-control-sm"
+                                           minlength="8" maxlength="63" autocomplete="new-password" disabled>
+                                    <div class="text-muted" style="font-size:.72rem;">8-63 位；开放模式无需密码</div>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label mb-0">网络</label>
+                                    <input name="network" class="form-control form-control-sm" value="lan" placeholder="lan">
+                                </div>
+                                <div class="col-12">
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="checkbox" name="hidden" value="1" id="add-hid-{{$r.Section}}">
+                                        <label class="form-check-label" for="add-hid-{{$r.Section}}">隐藏</label>
+                                    </div>
+                                    <div class="form-check form-check-inline" title="仅 AP 模式有效">
+                                        <input class="form-check-input" type="checkbox" name="isolate" value="1" id="add-iso-{{$r.Section}}">
+                                        <label class="form-check-label" for="add-iso-{{$r.Section}}">客户端隔离</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-2">
+                                <button type="submit" class="btn btn-success btn-sm"><i class="fas fa-plus me-1"></i> 新增</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#add-ssid-{{$r.Section}}">取消</button>
+                            </div>
+                        </form>
+                    </div>
+                    {{range $s := $r.Ifaces}}
+                    <div class="border rounded p-2 mb-2">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span>
+                                <code class="fw-bold">{{$s.SSID}}</code>
+                                <span class="badge bg-primary ms-1">{{$s.Mode}}</span>
+                                <span class="badge bg-{{if eq $s.EncText `开放`}}secondary{{else}}success{{end}} ms-1">{{$s.EncText}}</span>
+                                {{if $s.Hidden}}<span class="badge bg-dark ms-1">隐藏</span>{{end}}
+                            </span>
+                            <span>
+                                <button class="btn btn-outline-primary btn-sm py-0 px-2" data-bs-toggle="collapse" data-bs-target="#edit-ssid-{{$s.Section}}" aria-expanded="false" aria-controls="edit-ssid-{{$s.Section}}">编辑</button>
+                                <form method="post" action="/devices/{{$.Device.DeviceID}}/config/wireless/ssid/delete" class="d-inline" onsubmit="return delSSID(this);">
+                                    <input type="hidden" name="section" value="{{$s.Section}}">
+                                    <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-2">删除</button>
+                                </form>
+                            </span>
+                        </div>
+                        <table class="table table-sm mb-0 small">
+                            <tbody>
+                            <tr><th class="table-light" style="width:140px;">section</th><td><code>{{$s.Section}}</code></td></tr>
+                            <tr><th class="table-light">网络</th><td>{{$s.Network}}</td></tr>
+                            <tr><th class="table-light">实时接口</th><td>{{if $s.Ifname}}<code>{{$s.Ifname}}</code>{{else}}—{{end}}</td></tr>
+                            </tbody>
+                        </table>
+                        <div class="collapse mt-2" id="edit-ssid-{{$s.Section}}">
+                            <form method="post" action="/devices/{{$.Device.DeviceID}}/config/wireless/ssid" class="border rounded p-2 bg-light"
+                                  onsubmit="return saveSSID(this);">
+                                <input type="hidden" name="radio" value="{{$r.Section}}">
+                                <input type="hidden" name="section" value="{{$s.Section}}">
+                                <div class="row g-2 small">
+                                    <div class="col-6 col-md-3">
+                                        <label class="form-label mb-0">SSID 名称</label>
+                                        <input name="ssid" class="form-control form-control-sm" value="{{$s.SSID}}" maxlength="32" required>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <label class="form-label mb-0">加密</label>
+                                        <select name="encryption" class="form-select form-select-sm" data-key="key-{{$s.Section}}" onchange="onEncChange(this)">
+                                            {{$s.EncOptionsHTML}}
+                                        </select>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <label class="form-label mb-0">密码</label>
+                                        <input type="password" name="key" id="key-{{$s.Section}}" class="form-control form-control-sm"
+                                               value="{{$s.Key}}" minlength="8" maxlength="63" autocomplete="new-password"
+                                               {{if eq $s.Enc "none"}}disabled{{end}}>
+                                        <div class="text-muted" style="font-size:.72rem;">8-63 位；开放模式无需密码</div>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <label class="form-label mb-0">网络</label>
+                                        <input name="network" class="form-control form-control-sm" value="{{$s.Network}}" placeholder="lan">
+                                    </div>
+                                    <div class="col-12">
+                                        <div class="form-check form-check-inline">
+                                            <input class="form-check-input" type="checkbox" name="hidden" value="1" id="hid-{{$s.Section}}" {{if $s.Hidden}}checked{{end}}>
+                                            <label class="form-check-label" for="hid-{{$s.Section}}">隐藏</label>
+                                        </div>
+                                        <div class="form-check form-check-inline" title="仅 AP 模式有效">
+                                            <input class="form-check-input" type="checkbox" name="isolate" value="1" id="iso-{{$s.Section}}" {{if $s.Isolate}}checked{{end}}>
+                                            <label class="form-check-label" for="iso-{{$s.Section}}">客户端隔离</label>
+                                        </div>
+                                        <div class="form-check form-check-inline">
+                                            <input class="form-check-input" type="checkbox" name="disabled" value="1" id="sdis-{{$s.Section}}" {{if $s.Disabled}}checked{{end}}>
+                                            <label class="form-check-label" for="sdis-{{$s.Section}}">禁用此 SSID</label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mt-2">
+                                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-paper-plane me-1"></i> 应用修改</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#edit-ssid-{{$s.Section}}">取消</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+            {{end}}
+        {{else}}
+        <div class="card shadow-sm">
+            <div class="card-body"><div class="text-muted small py-3 text-center">无无线配置数据（设备离线或调用失败）</div></div>
+        </div>
+        {{end}}
+    </div>
+</div>
+
+<div id="saving-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;">
+    <div class="bg-white rounded p-4 text-center shadow" style="min-width:280px;">
+        <div class="spinner-border text-primary mb-2" role="status"><span class="visually-hidden">Loading...</span></div>
+        <div class="small fw-semibold">正在应用配置，请稍候…</div>
+        <div class="text-muted small">无线重载可能需要数秒，期间请勿关闭或刷新页面</div>
+    </div>
+</div>
+
+<script>
+// 编辑后经 ?tab= 重定向回来时恢复停留在对应 TAB。
+(function () {
+    var t = new URLSearchParams(location.search).get('tab');
+    if (!t) return;
+    var btn = document.querySelector('[data-bs-target="#tab-' + t + '"]');
+    if (btn && window.bootstrap) bootstrap.Tab.getOrCreateInstance(btn).show();
+})();
+
+// 无线模式 → 频宽 联动：切换模式时按该模式支持的频宽（data-widths）重建下拉。
+// 例：ax → 20/40/80 MHz（由设备实时 htmodes 分组而来）；默认/禁用HT 时禁用频宽下拉。
+function onModeChange(sel) {
+    var radio = sel.getAttribute('data-radio');
+    var ws = document.getElementById('width-' + radio);
+    if (!ws) return;
+    var groups = {};
+    try { groups = JSON.parse(sel.getAttribute('data-widths') || '{}'); } catch (e) {}
+    var widths = groups[sel.value] || [];
+    if (!widths.length) {
+        ws.innerHTML = '';
+        ws.disabled = true;
+        return;
+    }
+    // 尽量保留上次选择的频宽（跨模式有效时），否则取第一项
+    var cur = ws.getAttribute('data-cur') || '';
+    var keep = (cur && widths.indexOf(cur) >= 0) ? cur : widths[0];
+    ws.innerHTML = widths.map(function (w) {
+        return '<option value="' + w + '"' + (w === keep ? ' selected' : '') + '>' + w + ' MHz</option>';
+    }).join('');
+    ws.disabled = false;
+    ws.setAttribute('data-cur', keep);
+}
+
+// 无线网卡参数提交：确认 → 显示保存遮罩 → 延迟提交（保证遮罩先渲染）。
+function saveRadio(form) {
+    var msg = '确认修改 ' + form.radio.value + ' 参数？\n\n'
+        + '信道/频宽/国家变更可能导致无线客户端断开连接。\n'
+        + '修改将通过 rollback 机制应用：30 秒内未确认成功会自动回滚。';
+    if (!confirm(msg)) return false;
+    var ov = document.getElementById('saving-overlay');
+    if (ov) {
+        ov.style.display = 'flex';
+        // 兜底：请求异常卡住时 60 秒后自动移除遮罩，避免页面被锁死
+        setTimeout(function () { ov.style.display = 'none'; }, 60000);
+    }
+    setTimeout(function () { form.submit(); }, 350);
+    return false;
+}
+
+// 加密切换 → 密码输入启用/禁用（开放模式无需密码）。
+function onEncChange(sel) {
+    var k = document.getElementById(sel.getAttribute('data-key'));
+    if (!k) return;
+    if (sel.value === 'none') {
+        k.value = '';
+        k.disabled = true;
+    } else {
+        k.disabled = false;
+    }
+}
+
+// SSID 新增/编辑提交：确认 → 遮罩 → 延迟提交（同 saveRadio 模式）。
+function saveSSID(form) {
+    var isAdd = !form.section;
+    var name = form.ssid.value;
+    var msg = isAdd
+        ? '确认新增 SSID「' + name + '」（' + form.radio.value + '）？'
+        : '确认修改 SSID「' + name + '」（' + form.section.value + '）？\n\n'
+          + '加密方式或密码变更会导致无线客户端断开并需要重新连接。';
+    if (!confirm(msg)) return false;
+    var ov = document.getElementById('saving-overlay');
+    if (ov) {
+        ov.style.display = 'flex';
+        setTimeout(function () { ov.style.display = 'none'; }, 60000);
+    }
+    setTimeout(function () { form.submit(); }, 350);
+    return false;
+}
+
+// SSID 删除提交：危险操作二次确认 → 遮罩 → 提交。
+function delSSID(form) {
+    var sec = form.section.value;
+    if (!confirm('确认删除 SSID（' + sec + '）？\n\n删除后该网络的客户端将断开连接；30 秒回滚窗口内未确认会自动还原。')) return false;
+    var ov = document.getElementById('saving-overlay');
+    if (ov) {
+        ov.style.display = 'flex';
+        setTimeout(function () { ov.style.display = 'none'; }, 60000);
+    }
+    setTimeout(function () { form.submit(); }, 350);
+    return false;
+}
+</script>
+{{end}}
+
+{{define "ucicards"}}
+    {{range .}}
+    <div class="border rounded p-2 mb-2">
+        <div class="mb-1">
+            <code class="fw-bold">{{.Name}}</code>
+            <span class="badge bg-secondary ms-1">{{.Type}}</span>
+            {{if .Anonymous}}<span class="badge bg-light text-muted ms-1">anonymous</span>{{end}}
+        </div>
+        {{if .Fields}}
+        <div class="table-responsive">
+            <table class="table table-sm mb-0 small bg-white">
+                <tbody>
+                {{range .Fields}}
+                <tr><th class="table-light" style="width:200px;">{{.Key}}</th><td style="word-break:break-all;">{{.Value}}</td></tr>
+                {{end}}
+                </tbody>
+            </table>
+        </div>
+        {{else}}
+        <div class="text-muted small">（无选项）</div>
+        {{end}}
+    </div>
+    {{end}}
+{{end}}

@@ -1,0 +1,48 @@
+{{define "content"}}
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <h5 class="mb-0"><i class="fas fa-file-alt me-1"></i> 审计日志</h5>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-list-ul me-1"></i> 操作记录</span></div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width:150px;">时间</th>
+                        <th>用户</th>
+                        <th>动作</th>
+                        <th>目标</th>
+                        <th>IP</th>
+                        <th>详情</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {{range .Logs}}
+                    <tr>
+                        <td>{{tFmt .CreatedAt}}</td>
+                        <td>{{.Username}}</td>
+                        <td><code>{{.Action}}</code></td>
+                        <td>{{.Target}}</td>
+                        <td>{{.IP}}</td>
+                        <td>{{if .Detail}}<code class="small text-break">{{bsstr .Detail}}</code>{{else}}<span class="text-muted">-</span>{{end}}</td>
+                    </tr>
+                {{else}}
+                    <tr><td colspan="6" class="text-center text-muted py-3">暂无日志</td></tr>
+                {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="card-footer bg-white py-2 d-flex justify-content-between align-items-center">
+        <span class="small text-muted">第 {{.Page}} / {{.TotalPages}} 页</span>
+        <nav>
+            <ul class="pagination pagination-sm mb-0">
+                {{if .PrevPage}}<li class="page-item"><a class="page-link" href="/audit?page={{.PrevPage}}">上一页</a></li>{{else}}<li class="page-item disabled"><span class="page-link">上一页</span></li>{{end}}
+                {{if .NextPage}}<li class="page-item"><a class="page-link" href="/audit?page={{.NextPage}}">下一页</a></li>{{else}}<li class="page-item disabled"><span class="page-link">下一页</span></li>{{end}}
+            </ul>
+        </nav>
+    </div>
+</div>
+{{end}}

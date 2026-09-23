@@ -1,0 +1,142 @@
+{{define "content"}}
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <h5 class="mb-0"><i class="fas fa-wifi me-1"></i> 无线管理 - {{.DeviceName}}</h5>
+    <a href="/devices/{{.DeviceID}}" class="btn btn-outline-secondary btn-sm"><i class="fas fa-arrow-left"></i> 返回详情</a>
+</div>
+
+<form method="get" action="/devices/{{.DeviceID}}/wireless" class="row g-2 align-items-end mb-2" onchange="this.submit()">
+    <div class="col-auto">
+        <label class="form-label mb-0 small">无线接口</label>
+        <select class="form-select form-select-sm" name="ifname">
+            {{range .Interfaces}}
+            <option value="{{.}}" {{if eq . $.CurIfname}}selected{{end}}>{{.}}</option>
+            {{end}}
+        </select>
+    </div>
+    <input type="hidden" name="tab" value="{{.Tab}}">
+    <noscript><div class="col-auto"><button class="btn btn-primary btn-sm">切换</button></div></noscript>
+</form>
+
+<ul class="nav nav-pills mb-2">
+    <li class="nav-item"><a class="nav-link py-1 px-2 small {{if eq .Tab `overview`}}active{{end}}" href="/devices/{{.DeviceID}}/wireless?tab=overview&ifname={{.CurIfname}}"><i class="fas fa-info-circle me-1"></i>概览</a></li>
+    <li class="nav-item"><a class="nav-link py-1 px-2 small {{if eq .Tab `stations`}}active{{end}}" href="/devices/{{.DeviceID}}/wireless?tab=stations&ifname={{.CurIfname}}"><i class="fas fa-laptop me-1"></i>接入终端</a></li>
+    <li class="nav-item"><a class="nav-link py-1 px-2 small {{if eq .Tab `scan`}}active{{end}}" href="/devices/{{.DeviceID}}/wireless?tab=scan&ifname={{.CurIfname}}"><i class="fas fa-satellite-dish me-1"></i>信号扫描</a></li>
+</ul>
+
+{{if .Error}}
+<div class="alert alert-warning py-2 small mb-0"><i class="fas fa-exclamation-triangle me-1"></i> {{.Error}}</div>
+{{else if eq .Tab `overview`}}
+{{if .WirelessDevices}}
+<div class="card shadow-sm mb-2">
+    <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-wifi me-1"></i> 无线配置与实时状态（getWirelessDevices）</span></div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm mb-0">
+                <tbody>
+                {{$cur := .CurIfname}}
+                {{range $radioName, $radio := .WirelessDevices}}
+                    {{range $itf := index $radio "interfaces"}}
+                        {{if eq (index $itf "ifname") $cur}}
+                        <tr><th class="table-light" style="width:200px;">radio</th><td>{{$radioName}}</td></tr>
+                        {{range $k, $v := index $itf "config"}}
+                        <tr><th class="table-light" style="width:200px;">config.{{$k}}</th><td>{{$v}}</td></tr>
+                        {{end}}
+                        {{range $k, $v := index $itf "iwinfo"}}
+                        <tr><th class="table-light" style="width:200px;">iwinfo.{{$k}}</th><td>{{$v}}</td></tr>
+                        {{end}}
+                        {{end}}
+                    {{end}}
+                {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{{end}}
+<div class="card shadow-sm">
+    <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-info-circle me-1"></i> 接口 {{.CurIfname}} 实时信息</span></div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm mb-0">
+                <tbody>
+                {{range $k, $v := .Iwinfo}}
+                    <tr><th class="table-light" style="width:160px;">{{$k}}</th><td>{{$v}}</td></tr>
+                {{else}}
+                    <tr><td colspan="2" class="text-muted text-center py-2">无数据</td></tr>
+                {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{{else if eq .Tab `stations`}}
+{{if .Stations}}
+<div class="row g-2">
+    {{range .Stations}}
+    <div class="col-md-6 col-lg-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-body p-2">
+                <dl class="row mb-0 small">
+                {{range $k, $v := .}}
+                    <dt class="col-sm-5 text-muted">{{$k}}</dt><dd class="col-sm-7 mb-0">{{$v}}</dd>
+                {{end}}
+                </dl>
+            </div>
+        </div>
+    </div>
+    {{end}}
+</div>
+{{else}}
+<div class="text-muted small py-3 text-center">暂无接入终端</div>
+{{end}}
+{{else if eq .Tab `scan`}}
+{{if .Scan}}
+<div class="card shadow-sm">
+    <div class="card-header bg-white py-2 d-flex align-items-center">
+        <span class="small fw-semibold"><i class="fas fa-satellite-dish me-1"></i> 周边AP扫描结果</span>
+        <span class="badge bg-secondary ms-2">{{len .Scan}}</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0 small">
+                <thead>
+                    <tr class="table-light">
+                        <th>SSID</th>
+                        <th>BSSID</th>
+                        <th>频段</th>
+                        <th>信道</th>
+                        <th>频率(MHz)</th>
+                        <th>信号(dBm)</th>
+                        <th style="width:120px;">质量</th>
+                        <th>加密</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {{range .Scan}}
+                    <tr>
+                        <td>{{.ssid}}</td>
+                        <td><code>{{.bssid}}</code></td>
+                        <td>{{.band}}</td>
+                        <td>{{.channel}}</td>
+                        <td>{{.mhz}}</td>
+                        <td>{{.signal}}</td>
+                        <td>
+                            <div class="progress" style="height:14px;">
+                                <div class="progress-bar bg-{{.signal_class}}" role="progressbar"
+                                     style="width: {{printf "%.0f" .quality_pct}}%;"
+                                     aria-valuenow="{{printf "%.0f" .quality_pct}}" aria-valuemin="0" aria-valuemax="100">{{printf "%.0f" .quality_pct}}%</div>
+                            </div>
+                        </td>
+                        <td>{{.encryption}}</td>
+                    </tr>
+                {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{{else}}
+<div class="text-muted small py-3 text-center">暂无扫描结果</div>
+{{end}}
+{{end}}
+{{end}}

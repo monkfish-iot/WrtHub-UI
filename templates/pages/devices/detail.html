@@ -1,0 +1,133 @@
+{{define "content"}}
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <h5 class="mb-0"><i class="fas fa-server me-1"></i> {{.Device.DeviceName}}</h5>
+    <a href="/devices" class="btn btn-outline-secondary btn-sm"><i class="fas fa-arrow-left"></i> 返回列表</a>
+</div>
+
+{{if .RPCError}}
+<div class="alert alert-warning py-2 small mb-2"><i class="fas fa-exclamation-triangle me-1"></i> 实时信息拉取失败：{{.RPCError}}（已使用降级值）</div>
+{{end}}
+
+<ul class="nav nav-tabs mb-2" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-basic" type="button" role="tab"><i class="fas fa-info-circle me-1"></i> 基础信息</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-nic" type="button" role="tab"><i class="fas fa-network-wired me-1"></i> 网络接口 <span class="badge bg-secondary">{{len .NetDevs}}</span></button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-iface" type="button" role="tab"><i class="fas fa-route me-1"></i> 逻辑接口 <span class="badge bg-secondary">{{len .NetIfaces}}</span></button>
+    </li>
+</ul>
+
+<div class="tab-content">
+    <div class="tab-pane fade show active" id="tab-basic" role="tabpanel">
+        <div class="card shadow-sm mb-3">
+            <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-info-circle me-1"></i> 基础信息</span></div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        <tr><th class="table-light" style="width:140px;">设备名称</th><td>{{.Device.DeviceName}}</td></tr>
+                        <tr><th class="table-light">访问地址</th><td><code>{{.Host}}</code></td></tr>
+                        <tr><th class="table-light">设备状态</th><td><span class="badge bg-{{statusBadge .Device.Status}}">{{.Device.Status}}</span></td></tr>
+                        <tr><th class="table-light">设备型号</th><td>{{.Device.Model}}</td></tr>
+                        <tr><th class="table-light">设备序列号</th><td>{{.Serial}}</td></tr>
+                        <tr><th class="table-light">设备 MAC</th><td><code>{{.Device.MacAddress}}</code></td></tr>
+                        <tr><th class="table-light">内网管理 IP</th><td>{{if .LanIP}}<code>{{.LanIP}}</code>{{else}}<span class="text-muted">—</span>{{end}}</td></tr>
+                        <tr><th class="table-light">公网 IP</th><td>{{.Device.ExtIPAddress}}</td></tr>
+                        <tr><th class="table-light">厂商</th><td>{{.Device.Vendor}}</td></tr>
+                        <tr><th class="table-light">最后心跳</th><td>{{tFmt .Device.LastHeartbeat}}</td></tr>
+                        <tr><th class="table-light">首次发现</th><td>{{tFmt .Device.FirstSeen}}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-code me-1"></i> 状态快照 (additional_data)</span></div>
+            <div class="card-body p-2">
+                <pre class="small mb-0" style="max-height:320px;overflow:auto;background:#f8f9fa;padding:.5rem;border-radius:.25rem;">{{.Snapshot}}</pre>
+            </div>
+        </div>
+    </div>
+
+    <div class="tab-pane fade" id="tab-nic" role="tabpanel">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-network-wired me-1"></i> 全量网卡（getNetworkDevices）</span></div>
+            <div class="card-body p-0">
+                {{if .NetDevs}}
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0 small">
+                        <thead>
+                            <tr class="table-light">
+                                <th>接口</th><th>类型</th><th>状态</th><th>网桥</th><th>MAC</th><th>IP 地址</th><th>MTU</th><th>链路</th><th>收发统计</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {{range .NetDevs}}
+                            <tr>
+                                <td class="fw-semibold">
+                                    {{.Name}}
+                                    {{if .Wireless}}<i class="fas fa-wifi text-muted ms-1" title="无线接口"></i>{{end}}
+                                </td>
+                                <td>{{.DevType}}</td>
+                                <td>{{if .Up}}<span class="badge bg-success">up</span>{{else}}<span class="badge bg-secondary">down</span>{{end}}</td>
+                                <td>{{if .Bridge}}{{.Ports}}{{else if .Master}}{{.Master}}{{else}}—{{end}}</td>
+                                <td><code>{{.MAC}}</code></td>
+                                <td>{{if .IPs}}<code>{{.IPs}}</code>{{else}}—{{end}}</td>
+                                <td>{{.MTU}}</td>
+                                <td>{{if .Link}}{{.Link}}{{else}}—{{end}}</td>
+                                <td class="text-nowrap">{{.Stats}}</td>
+                            </tr>
+                        {{end}}
+                        </tbody>
+                    </table>
+                </div>
+                {{else}}
+                <div class="text-muted small py-3 text-center">无网络接口数据（设备离线或调用失败）</div>
+                {{end}}
+            </div>
+        </div>
+    </div>
+
+    <div class="tab-pane fade" id="tab-iface" role="tabpanel">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-route me-1"></i> 逻辑接口状态（network.interface dump）</span></div>
+            <div class="card-body p-0">
+                {{if .NetIfaces}}
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0 small">
+                        <thead>
+                            <tr class="table-light">
+                                <th>接口</th><th>协议</th><th>状态</th><th>设备</th><th>运行时长</th><th>IPv4</th><th>DNS</th><th>路由</th><th>备注</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {{range .NetIfaces}}
+                            <tr>
+                                <td class="fw-semibold">{{.Name}}</td>
+                                <td><span class="badge bg-info text-dark">{{.Proto}}</span></td>
+                                <td>{{if .Up}}<span class="badge bg-success">up</span>{{else}}<span class="badge bg-secondary">down</span>{{end}}</td>
+                                <td>{{if .Device}}<code>{{.Device}}</code>{{else}}—{{end}}</td>
+                                <td class="text-nowrap">{{.Uptime}}</td>
+                                <td>{{if .IPv4}}<code>{{.IPv4}}</code>{{else}}—{{end}}</td>
+                                <td>{{if .DNS}}{{.DNS}}{{else}}—{{end}}</td>
+                                <td>{{if .Routes}}<code>{{.Routes}}</code>{{else}}—{{end}}</td>
+                                <td>{{if .Extra}}{{.Extra}}{{else}}—{{end}}</td>
+                            </tr>
+                        {{end}}
+                        </tbody>
+                    </table>
+                </div>
+                {{else}}
+                <div class="text-muted small py-3 text-center">无逻辑接口数据（设备离线或调用失败）</div>
+                {{end}}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="mb-3 mt-3">
+    <a href="/devices/{{.Device.DeviceID}}/wireless" class="btn btn-primary btn-sm"><i class="fas fa-wifi me-1"></i> 进入无线管理</a>
+</div>
+{{end}}

@@ -1,0 +1,36 @@
+app:
+  log_level: info
+
+server:
+  addr: ":8080"
+  session_secret: "change-me"
+
+frps_helper:
+  base_url: "https://127.0.0.1:7443"
+  tls_insecure: true
+  credential_query: true
+  request_timeout: "10s"
+
+device_rpc:
+  scheme: "http"
+  domain_suffix: "frpclient.local"   # {session_id}.frpclient.local
+  port: 20001                         # 固定但可配
+  auth_path: "/auth"
+  rpc_path_prefix: "/cgi-bin/luci/rpc"
+  token_cache_ttl: "5m"
+  timeout: "10s"
+  max_concurrency: 4                  # 单设备并发上限
+
+auth:
+  mode: "local"                       # local | casdoor
+  init_username: "admin"              # 首次启动自动创建的管理员用户名
+  init_password: "admin@123"         # 首次启动自动创建的管理员初始密码；请尽快登录后修改
+
+storage:
+  driver: "sqlite"                    # sqlite | postgres
+  sqlite_path: "data/wrthub.db"
+  # postgres_dsn: "host=... user=... ..."
+
+assets:
+  external_dir: "./assets"           # 优先；缺失回退 embed
+  templates_dir: "./templates"

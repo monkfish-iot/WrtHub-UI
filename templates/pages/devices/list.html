@@ -1,0 +1,85 @@
+{{define "content"}}
+<div class="toolbar-compact rounded-top border">
+    <form method="get" action="/devices" class="row g-2 align-items-end">
+        <div class="col-md-3 col-sm-6">
+            <label class="form-label mb-0 small">关键词</label>
+            <input type="text" class="form-control form-control-sm" name="keyword" value="{{.Filters.Keyword}}" placeholder="名称 / ID / MAC">
+        </div>
+        <div class="col-md-2 col-sm-6">
+            <label class="form-label mb-0 small">状态</label>
+            <select class="form-select form-select-sm" name="status">
+                <option value="">全部</option>
+                <option value="online" {{if eq .Filters.Status `online`}}selected{{end}}>在线</option>
+                <option value="offline" {{if eq .Filters.Status `offline`}}selected{{end}}>离线</option>
+                <option value="pending" {{if eq .Filters.Status `pending`}}selected{{end}}>待定</option>
+            </select>
+        </div>
+        <div class="col-md-2 col-sm-6">
+            <label class="form-label mb-0 small">型号</label>
+            <input type="text" class="form-control form-control-sm" name="model" value="{{.Filters.Model}}">
+        </div>
+        <div class="col-md-2 col-sm-6">
+            <button class="btn btn-primary btn-sm w-100"><i class="fas fa-search"></i> 查询</button>
+        </div>
+    </form>
+</div>
+
+<div class="card rounded-0 rounded-bottom shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center bg-white py-2">
+        <span class="small fw-semibold"><i class="fas fa-list-ul me-1"></i> 设备列表 (共 {{.Total}} 条)</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>设备名称</th>
+                        <th>访问地址</th>
+                        <th>状态</th>
+                        <th>型号</th>
+                        <th>MAC</th>
+                        <th>厂商</th>
+                        <th>公网IP</th>
+                        <th>最后心跳</th>
+                        <th style="width:130px;">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {{range .Devices}}
+                    <tr>
+                        <td>{{.DeviceName}}</td>
+                        <td><code>{{.SessionID}}.{{$.Config.DeviceRpc.DomainSuffix}}:{{$.Config.DeviceRpc.Port}}</code></td>
+                        <td><span class="badge bg-{{statusBadge .Status}}">{{.Status}}</span></td>
+                        <td>{{.Model}}</td>
+                        <td>{{.MacAddress}}</td>
+                        <td>{{.Vendor}}</td>
+                        <td>{{.ExtIPAddress}}</td>
+                        <td>{{tFmt .LastHeartbeat}}</td>
+                        <td class="text-nowrap">
+                            <a href="/devices/{{.DeviceID}}" class="btn btn-outline-primary btn-sm py-0 px-2">详情</a>
+                            <a href="/devices/{{.DeviceID}}/wireless" class="btn btn-outline-success btn-sm py-0 px-1" title="无线管理"><i class="fas fa-wifi"></i></a>
+                            <a href="/devices/{{.DeviceID}}/config" class="btn btn-outline-warning btn-sm py-0 px-1" title="UCI 配置"><i class="fas fa-cog"></i></a>
+                        </td>
+                    </tr>
+                {{else}}
+                    <tr><td colspan="9" class="text-center text-muted py-3">暂无设备</td></tr>
+                {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="card-footer bg-white py-2 d-flex justify-content-between align-items-center">
+        <span class="small text-muted">第 {{.Page}} / {{.TotalPages}} 页，每页 {{.PageSize}} 条</span>
+        <nav>
+            <ul class="pagination pagination-sm mb-0">
+            {{range .Pages}}
+                {{if .Disabled}}<li class="page-item disabled"><span class="page-link">{{.Label}}</span></li>
+                {{else if .Active}}<li class="page-item active"><span class="page-link">{{.Label}}</span></li>
+                {{else}}<li class="page-item"><a class="page-link" href="{{.URL}}">{{.Label}}</a></li>
+                {{end}}
+            {{end}}
+            </ul>
+        </nav>
+    </div>
+</div>
+{{end}}
