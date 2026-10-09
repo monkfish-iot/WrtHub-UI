@@ -2,7 +2,6 @@
 <div class="d-flex justify-content-between align-items-center mb-2">
     <h5 class="mb-0"><i class="fas fa-cog me-1"></i> 设备配置 · {{.Device.DeviceName}}</h5>
     <div class="d-flex gap-1">
-        <a href="/devices/{{.Device.DeviceID}}" class="btn btn-outline-secondary btn-sm"><i class="fas fa-arrow-left"></i> 返回详情</a>
         <a href="/devices" class="btn btn-outline-secondary btn-sm"><i class="fas fa-list"></i> 设备列表</a>
         <form method="post" action="/devices/{{.Device.DeviceID}}/config/reboot" class="d-inline" onsubmit="return rebootDevice(this);">
             <button type="submit" class="btn btn-outline-danger btn-sm"><i class="fas fa-power-off me-1"></i> 重启</button>
@@ -19,16 +18,22 @@
 {{if .FlashErr}}
 <div class="alert alert-danger py-2 small mb-2"><i class="fas fa-times-circle me-1"></i> {{.FlashErr}}</div>
 {{end}}
+{{if .Restarting}}
+<div class="alert alert-info py-2 small mb-2"><i class="fas fa-sync fa-spin me-1"></i> 设备正在重启，配置信息暂不可用，约 1-2 分钟后自动恢复。 <a href="/devices/{{.Device.DeviceID}}/config?tab={{.ActiveTab}}" class="alert-link">刷新</a></div>
+{{end}}
 
 <ul class="nav nav-tabs mb-2" role="tablist">
     <li class="nav-item" role="presentation">
         <button class="nav-link {{if eq .ActiveTab `overview`}}active{{end}}" data-bs-toggle="tab" data-bs-target="#tab-overview" type="button" role="tab"><i class="fas fa-info-circle me-1"></i> 概览</button>
     </li>
     <li class="nav-item" role="presentation">
-        <button class="nav-link {{if eq .ActiveTab `network`}}active{{else if not (or (eq .ActiveTab `overview`) (eq .ActiveTab `wireless`) (eq .ActiveTab `clients`) (eq .ActiveTab `logs`))}}active{{end}}" data-bs-toggle="tab" data-bs-target="#tab-network" type="button" role="tab"><i class="fas fa-network-wired me-1"></i> 网络</button>
+        <button class="nav-link {{if eq .ActiveTab `network`}}active{{end}}" data-bs-toggle="tab" data-bs-target="#tab-network" type="button" role="tab"><i class="fas fa-network-wired me-1"></i> 网络</button>
     </li>
     <li class="nav-item" role="presentation">
         <button class="nav-link {{if eq .ActiveTab `wireless`}}active{{end}}" data-bs-toggle="tab" data-bs-target="#tab-wireless" type="button" role="tab"><i class="fas fa-wifi me-1"></i> 无线 {{if .Wireless}}<span class="badge bg-secondary">{{len .Wireless.Radios}}</span>{{end}}</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {{if eq .ActiveTab `scan`}}active{{end}}" data-bs-toggle="tab" data-bs-target="#tab-scan" type="button" role="tab"><i class="fas fa-search me-1"></i> 扫描 {{if .Scan}}<span class="badge bg-secondary">{{len .Scan}}</span>{{end}}</button>
     </li>
     <li class="nav-item" role="presentation">
         <button class="nav-link {{if eq .ActiveTab `clients`}}active{{end}}" data-bs-toggle="tab" data-bs-target="#tab-clients" type="button" role="tab"><i class="fas fa-laptop me-1"></i> 客户端 {{if .Clients}}<span class="badge bg-secondary">{{len .Clients}}</span>{{end}}</button>
@@ -36,11 +41,36 @@
     <li class="nav-item" role="presentation">
         <button class="nav-link {{if eq .ActiveTab `logs`}}active{{end}}" data-bs-toggle="tab" data-bs-target="#tab-logs" type="button" role="tab"><i class="fas fa-file-alt me-1"></i> 日志</button>
     </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {{if eq .ActiveTab `firmware`}}active{{end}}" data-bs-toggle="tab" data-bs-target="#tab-firmware" type="button" role="tab"><i class="fas fa-microchip me-1"></i> 固件升级</button>
+    </li>
 </ul>
 
 <div class="tab-content">
     <!-- 概览 TAB -->
     <div class="tab-pane fade {{if eq .ActiveTab `overview`}}show active{{end}}" id="tab-overview" role="tabpanel">
+        <div class="card shadow-sm mb-2">
+            <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-server me-1"></i> 设备信息</span></div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0 small">
+                    <tbody>
+                    <tr><th class="table-light" style="width:160px;">设备名称</th><td>{{.Device.DeviceName}}</td></tr>
+                    <tr><th class="table-light">设备 ID</th><td><code>{{.Device.DeviceID}}</code></td></tr>
+                    <tr><th class="table-light">访问地址</th><td><code>{{.Host}}</code></td></tr>
+                    <tr><th class="table-light">设备状态</th><td><span class="badge bg-{{statusBadge .Device.Status}}">{{.Device.Status}}</span></td></tr>
+                    <tr><th class="table-light">设备型号</th><td>{{if .Device.Model}}{{.Device.Model}}{{else}}—{{end}}</td></tr>
+                    <tr><th class="table-light">设备序列号</th><td>{{.Serial}}</td></tr>
+                    <tr><th class="table-light">设备 MAC</th><td>{{if .Device.MacAddress}}<code>{{.Device.MacAddress}}</code>{{else}}—{{end}}</td></tr>
+                    <tr><th class="table-light">内网管理 IP</th><td>{{if .LanIP}}<code>{{.LanIP}}</code>{{else}}—{{end}}</td></tr>
+                    <tr><th class="table-light">公网 IP</th><td>{{if .Device.ExtIPAddress}}{{.Device.ExtIPAddress}}{{else}}—{{end}}</td></tr>
+                    <tr><th class="table-light">厂商</th><td>{{if .Device.Vendor}}{{.Device.Vendor}}{{else}}—{{end}}</td></tr>
+                    <tr><th class="table-light">最后心跳</th><td>{{tFmt .Device.LastHeartbeat}}</td></tr>
+                    <tr><th class="table-light">首次发现</th><td>{{tFmt .Device.FirstSeen}}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         {{if .Overview}}
         <div class="card shadow-sm mb-2">
             <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-microchip me-1"></i> 系统信息（system.board）</span></div>
@@ -57,7 +87,7 @@
                 </table>
             </div>
         </div>
-        <div class="card shadow-sm">
+        <div class="card shadow-sm mb-2">
             <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-tachometer-alt me-1"></i> 运行状态（system.info）</span></div>
             <div class="card-body p-0">
                 <table class="table table-sm mb-0 small">
@@ -71,12 +101,34 @@
             </div>
         </div>
         {{else}}
-        <div class="text-muted small py-3 text-center">无概览数据（设备离线或调用失败）</div>
+        <div class="text-muted small py-3 text-center">无系统数据（设备离线或调用失败）</div>
         {{end}}
+
+        <div class="card shadow-sm">
+            <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-clipboard-list me-1"></i> 设备状态快照</span></div>
+            <div class="card-body p-0">
+                {{if .Snapshot}}
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0 small">
+                        <tbody>
+                        {{range .Snapshot}}
+                            <tr>
+                                <th class="table-light" style="width:220px;">{{.Key}}</th>
+                                <td>{{.Value}}</td>
+                            </tr>
+                        {{end}}
+                        </tbody>
+                    </table>
+                </div>
+                {{else}}
+                <div class="text-muted small py-3 text-center">无快照数据</div>
+                {{end}}
+            </div>
+        </div>
     </div>
 
     <!-- 网络 TAB -->
-    <div class="tab-pane fade {{if or (eq .ActiveTab `network`) (not (or (eq .ActiveTab `overview`) (eq .ActiveTab `wireless`) (eq .ActiveTab `clients`) (eq .ActiveTab `logs`)))}}show active{{end}}" id="tab-network" role="tabpanel">
+    <div class="tab-pane fade {{if eq .ActiveTab `network`}}show active{{end}}" id="tab-network" role="tabpanel">
         <div class="card shadow-sm mb-2">
             <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-ethernet me-1"></i> 网络接口状态（network.interface dump）</span></div>
             <div class="card-body p-0">
@@ -413,6 +465,66 @@
         {{end}}
     </div>
 
+    <!-- 扫描 TAB -->
+    <div class="tab-pane fade {{if eq .ActiveTab `scan`}}show active{{end}}" id="tab-scan" role="tabpanel">
+        <div class="card shadow-sm mb-2">
+            <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+                <span class="small fw-semibold"><i class="fas fa-search me-1"></i> 周边 AP 扫描（iwinfo scan）</span>
+                <form method="get" action="/devices/{{.Device.DeviceID}}/config" class="d-flex gap-1">
+                    <input type="hidden" name="tab" value="scan">
+                    <select name="scan_if" class="form-select form-select-sm" style="width:auto;">
+                        {{range .WirelessIfs}}<option value="{{.}}" {{if eq . $.CurScanIf}}selected{{end}}>{{.}}</option>{{end}}
+                    </select>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-sync-alt me-1"></i> 扫描</button>
+                </form>
+            </div>
+            <div class="card-body p-0">
+                {{if .Scan}}
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0 small">
+                        <thead>
+                            <tr class="table-light">
+                                <th>SSID</th>
+                                <th>BSSID</th>
+                                <th>频段</th>
+                                <th>信道</th>
+                                <th>频率</th>
+                                <th>信号(dBm)</th>
+                                <th>质量</th>
+                                <th>加密</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {{range .Scan}}
+                            <tr>
+                                <td>{{.ssid}}</td>
+                                <td><code>{{.bssid}}</code></td>
+                                <td>{{.band}}</td>
+                                <td>{{.channel}}</td>
+                                <td>{{.mhz}} MHz</td>
+                                <td class="text-{{.signal_class}}">{{.signal}}</td>
+                                <td style="width:120px;">
+                                    <div class="progress" style="height:16px;">
+                                        <div class="progress-bar bg-{{.signal_class}}" role="progressbar"
+                                             style="width: {{printf "%.0f" .quality_pct}}%;"
+                                             aria-valuenow="{{printf "%.0f" .quality_pct}}" aria-valuemin="0" aria-valuemax="100">{{printf "%.0f" .quality_pct}}%</div>
+                                    </div>
+                                </td>
+                                <td>{{.encryption}}</td>
+                            </tr>
+                        {{end}}
+                        </tbody>
+                    </table>
+                </div>
+                {{else}}
+                <div class="text-muted small py-3 text-center">
+                    {{if eq .ActiveTab `scan`}}暂无扫描结果，请点击「扫描」按钮{{else}}点击「扫描」按钮开始扫描周边 AP{{end}}
+                </div>
+                {{end}}
+            </div>
+        </div>
+    </div>
+
     <!-- 客户端 TAB -->
     <div class="tab-pane fade {{if eq .ActiveTab `clients`}}show active{{end}}" id="tab-clients" role="tabpanel">
         <div class="card shadow-sm">
@@ -463,7 +575,7 @@
     <div class="tab-pane fade {{if eq .ActiveTab `logs`}}show active{{end}}" id="tab-logs" role="tabpanel">
         <div class="card shadow-sm">
             <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
-                <span class="small fw-semibold"><i class="fas fa-file-alt me-1"></i> 系统日志（log read，最近 {{len .Logs}} 行）</span>
+                <span class="small fw-semibold"><i class="fas fa-file-alt me-1"></i> 系统日志（最近 {{len .Logs}} 条）</span>
                 <a href="/devices/{{.Device.DeviceID}}/config?tab=logs" class="btn btn-outline-secondary btn-sm"><i class="fas fa-sync-alt me-1"></i> 刷新</a>
             </div>
             <div class="card-body p-0">
@@ -472,8 +584,8 @@
                     <table class="table table-sm mb-0 small" style="font-family:monospace;">
                         <thead class="sticky-top">
                             <tr class="table-light">
-                                <th style="width:180px;">时间</th>
-                                <th style="width:90px;">来源</th>
+                                <th style="width:120px;">时间</th>
+                                <th style="width:80px;">级别</th>
                                 <th>消息</th>
                             </tr>
                         </thead>
@@ -481,7 +593,7 @@
                         {{range .Logs}}
                             <tr>
                                 <td class="text-nowrap">{{.Time}}</td>
-                                <td><span class="badge bg-light text-dark">{{.Facility}}</span></td>
+                                <td><span class="badge {{.BadgeClass}}">{{.Level}}</span></td>
                                 <td style="word-break:break-all;">{{.Message}}</td>
                             </tr>
                         {{end}}
@@ -493,6 +605,91 @@
                 {{end}}
             </div>
         </div>
+    </div>
+
+    <!-- 固件升级 TAB -->
+    <div class="tab-pane fade {{if eq .ActiveTab `firmware`}}show active{{end}}" id="tab-firmware" role="tabpanel">
+        {{if .Firmware}}
+        <div class="card shadow-sm mb-2">
+            <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-info-circle me-1"></i> 当前固件</span></div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0 small">
+                    <tbody>
+                    <tr><th class="table-light" style="width:160px;">设备型号</th><td>{{if .Firmware.Model}}{{.Firmware.Model}}{{else}}—{{end}}</td></tr>
+                    <tr><th class="table-light">当前版本</th><td>{{if .Firmware.CurrentVersion}}{{.Firmware.CurrentVersion}}{{else}}—{{end}}</td></tr>
+                    <tr><th class="table-light">固件库目录</th><td><code>{{.Firmware.FirmwareRoot}}{{if .Firmware.ModelDir}}/{{.Firmware.ModelDir}}{{end}}</code></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card shadow-sm">
+            <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+                <span class="small fw-semibold"><i class="fas fa-microchip me-1"></i> 可用固件</span>
+                <span class="text-muted small">共 {{len .Firmware.Entries}} 个</span>
+            </div>
+            <div class="card-body p-0">
+                {{if .Firmware.Entries}}
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0 small">
+                        <thead>
+                            <tr class="table-light">
+                                <th>文件名</th>
+                                <th>版本</th>
+                                <th>发布日期</th>
+                                <th>大小</th>
+                                <th>校验</th>
+                                <th>说明</th>
+                                <th style="width:140px;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {{range .Firmware.Entries}}
+                            <tr>
+                                <td><code>{{.Filename}}</code></td>
+                                <td><span class="badge bg-primary">{{.Version}}</span></td>
+                                <td>{{if .ReleaseDate}}{{.ReleaseDate}}{{else}}—{{end}}</td>
+                                <td>{{.SizeBytes}} B</td>
+                                <td>{{if .HasChecksum}}<span class="text-success"><i class="fas fa-check"></i></span>{{else}}<span class="text-muted">—</span>{{end}}</td>
+                                <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{.Notes}}">{{if .Notes}}{{.Notes}}{{else}}—{{end}}</td>
+                                <td>
+                                    <button class="btn btn-outline-primary btn-sm py-0 px-2" data-bs-toggle="collapse" data-bs-target="#fw-upgrade-{{.Filename}}" aria-expanded="false"><i class="fas fa-upload me-1"></i>升级</button>
+                                </td>
+                            </tr>
+                            <tr class="collapse" id="fw-upgrade-{{.Filename}}">
+                                <td colspan="7" class="bg-light p-2">
+                                    <form method="post" action="/devices/{{$.Device.DeviceID}}/config/firmware/upgrade" onsubmit="return upgradeFirmware(this);">
+                                        <input type="hidden" name="filename" value="{{.Filename}}">
+                                        <div class="d-flex flex-wrap gap-3 align-items-center small">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="force" value="1" id="fw-force-{{.Filename}}">
+                                                <label class="form-check-label" for="fw-force-{{.Filename}}">强制升级（跳过镜像校验）</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="keep_config" value="1" id="fw-keep-{{.Filename}}" checked>
+                                                <label class="form-check-label" for="fw-keep-{{.Filename}}">保留配置</label>
+                                            </div>
+                                            <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-exclamation-triangle me-1"></i> 确认升级</button>
+                                        </div>
+                                        <div class="text-muted small mt-1">升级流程：上传固件到设备 /tmp/firmware.bin → 镜像校验 → sysupgrade 执行 → 设备自动重启（约 2-5 分钟）</div>
+                                    </form>
+                                </td>
+                            </tr>
+                        {{end}}
+                        </tbody>
+                    </table>
+                </div>
+                {{else}}
+                <div class="text-muted small py-3 text-center">
+                    固件库中暂无该型号的固件。<br>
+                    请将固件文件放置到 <code>{{.Firmware.FirmwareRoot}}{{if .Firmware.ModelDir}}/{{.Firmware.ModelDir}}{{end}}</code> 目录，
+                    并放置同名 <code>.json</code> 说明文件（含 version 字段）。
+                </div>
+                {{end}}
+            </div>
+        </div>
+        {{else}}
+        <div class="text-muted small py-3 text-center">无法获取固件信息</div>
+        {{end}}
     </div>
 </div>
 
@@ -612,6 +809,31 @@ function kickClient(form) {
 // 重启设备：危险操作二次确认 → 提交。
 function rebootDevice(form) {
     if (!confirm('确认重启该设备？\n\n设备将在数秒后重启，约 1-2 分钟后恢复在线。\n重启期间设备不可达。')) return false;
+    form.submit();
+    return false;
+}
+
+// 固件升级：危险操作二次确认 → 提交。
+function upgradeFirmware(form) {
+    var filename = form.filename.value;
+    var force = form.force.checked;
+    var keep = form.keep_config.checked;
+    var mode = force ? '强制升级' : '普通升级';
+    if (!keep) mode += '（不保留配置）';
+    var msg = '确认对设备执行 ' + mode + '？\n\n'
+        + '固件文件：' + filename + '\n'
+        + '流程：上传 → 镜像校验 → sysupgrade → 设备自动重启\n\n'
+        + '升级期间设备将离线约 2-5 分钟，请勿断电。\n'
+        + (force ? '⚠ 强制升级跳过镜像兼容性校验，可能导致设备变砖！' : '');
+    if (!confirm(msg)) return false;
+    // 显示升级中遮罩
+    var ov = document.getElementById('saving-overlay');
+    if (ov) {
+        ov.style.display = 'flex';
+        ov.querySelector('.small.fw-semibold').textContent = '正在上传并升级固件…';
+        ov.querySelector('.text-muted').textContent = '上传固件 + 校验 + 写入，期间请勿关闭页面';
+        setTimeout(function () { ov.style.display = 'none'; }, 300000);
+    }
     form.submit();
     return false;
 }

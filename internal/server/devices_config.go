@@ -17,8 +17,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"wrthub-ui/internal/auth"
+	"wrthub-ui/internal/firmware"
 	"wrthub-ui/internal/frpsclient"
-	"wrthub-ui/internal/store"
 )
 
 // uciField 是 UCI 配置选项的键值对视图。
@@ -224,24 +224,42 @@ func (w *wirelessView) EncOptionsHTML() template.HTML { return ssidView{}.EncOpt
 // MacfilterOptionsHTML 新增 SSID 表单的 MAC 过滤下拉（零值 ssidView → Macfilter 为空，默认选中"不过滤"）。
 func (w *wirelessView) MacfilterOptionsHTML() template.HTML { return ssidView{}.MacfilterOptionsHTML() }
 
-// deviceConfigPage 是设备配置页视图（TAB：概览 / LAN / WAN(无则隐藏,只读) / 无线 / 客户端 / 日志；
+// deviceConfigPage 是设备配置页视图（TAB：概览 / 网络 / 无线 / 扫描 / 客户端 / 日志 / 固件；
 // 防火墙 TAB 暂时隐藏——用户确认，后续有需求再开发）。
 type deviceConfigPage struct {
 	pageBase
 	Device   *frpsclient.Device
+	Host     string       // 访问地址（{session_id}.{domain_suffix}:{port}）
+	Serial   string       // 设备序列号（system.board 现拉，失败降级 device_id）
+	LanIP    string       // 内网管理 IP（逻辑接口 lan 的首个 IPv4）
+	Snapshot []kvRow      // 状态快照 additional_data（表格呈现，替代原 JSON 展示）
 	LAN      []uciSection // LAN 组：lan/globals/br-lan device sections
 	WAN      []uciSection // WAN 组；nil = 无 WAN（桥模式）→ WAN TAB 隐藏
 	Wireless *wirelessView
 	// 新增 TAB 数据（参考 tentant-mng DeviceConfig.vue）
-	Overview  *overviewView // 概览：system.board + system.info
-	NetIfaces []netIfaceRow // 网络接口状态（network.interface dump）
-	Hosts     []hostRow     // 主机表（luci-rpc getHostHints）
-	Clients   []clientRow   // 接入客户端（iwinfo assoclist 聚合）
-	Logs      []logLine     // 系统日志（log read）
-	Error     string        // 拉取失败提示（不影响页面渲染）
-	FlashOK   string        // 写操作成功提示（来自 ?ok= 查询参数）
-	FlashErr  string        // 写操作失败提示（来自 ?err= 查询参数）
-	ActiveTab string        // 当前激活 TAB（用于写操作后回显定位）
+	Overview    *overviewView    // 概览：system.board + system.info
+	NetIfaces   []netIfaceRow    // 网络接口状态（network.interface dump）
+	Hosts       []hostRow        // 主机表（luci-rpc getHostHints）
+	Clients     []clientRow      // 接入客户端（iwinfo assoclist 聚合）
+	Logs        []logLine        // 系统日志（log read）
+	Scan        []map[string]any // 周边 AP 扫描结果（仅 tab=scan 时拉取）
+	WirelessIfs []string         // 无线接口列表（扫描 TAB 选择接口用）
+	CurScanIf   string           // 当前扫描接口
+	Firmware    *firmwarePage    // 固件升级 TAB
+	Error       string           // 拉取失败提示（不影响页面渲染）
+	FlashOK     string           // 写操作成功提示（来自 ?ok= 查询参数）
+	FlashErr    string           // 写操作失败提示（来自 ?err= 查询参数）
+	Restarting  bool             // 刚下发重启：跳过 UBUS 拉取，页面提示设备重启中
+	ActiveTab   string           // 当前激活 TAB（用于写操作后回显定位）
+}
+
+// firmwarePage 固件升级 TAB 视图。
+type firmwarePage struct {
+	CurrentVersion string
+	Model          string
+	ModelDir       string
+	FirmwareRoot   string
+	Entries        []firmware.Entry
 }
 
 // overviewView 概览 TAB 视图：system.board（硬件/固件信息）+ system.info（运行状态）。
@@ -375,9 +393,165 @@ type clientRow struct {
 
 // logLine 系统日志行（log read 响应，按行拆分）。
 type logLine struct {
-	Time     string
-	Facility string
-	Message  string
+	Time    string
+	Level   string
+	Message string
+}
+
+// BadgeClass 返回日志级别对应的 Bootstrap 徽章样式类。
+func (l logLine) BadgeClass() string {
+	switch strings.ToLower(strings.TrimSpace(l.Level)) {
+	case "error", "err", "crit", "alert", "emerg", "fatal":
+		return "bg-danger"
+	case "warn", "warning":
+		return "bg-warning text-dark"
+	case "notice":
+		return "bg-info text-dark"
+	case "debug":
+		return "bg-secondary"
+	default:
+		return "bg-light text-dark"
+	}
+}
+
+// kvRow 是通用键值行（概览 TAB 表格渲染）。
+type kvRow struct {
+	Key   string
+	Value string
+}
+
+// additionalDataLabels additional_data 已知字段的中文标签与展示顺序（南向接口规范 §3.2 状态上报字段）。
+var additionalDataLabels = []struct{ Key, Label string }{
+	{"source", "数据来源"},
+	{"cpu_temp", "CPU 温度"},
+	{"mem_total", "内存总量"},
+	{"mem_free", "空闲内存"},
+	{"disk_total", "磁盘总量"},
+	{"disk_free", "磁盘剩余"},
+	{"net_rx_bytes", "累计接收"},
+	{"net_tx_bytes", "累计发送"},
+	{"reported_at", "上报时间"},
+}
+
+// formatAdditionalData 将设备状态快照（frps_helper additional_data）转换为「中文标签 + 带单位数值」的有序键值行。
+// 已知字段按南向接口规范 §3.2 的物理单位格式化（温度 ℃、内存/磁盘 KB、流量 bytes）；
+// 未知字段回退为原始键名并按键名排序展开，保证快照字段不丢失（完全呈现）。
+func formatAdditionalData(raw json.RawMessage) []kvRow {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return []kvRow{{Key: "原始数据", Value: string(raw)}}
+	}
+	rows := make([]kvRow, 0, len(m))
+	for _, f := range additionalDataLabels {
+		v, ok := m[f.Key]
+		if !ok {
+			continue
+		}
+		delete(m, f.Key)
+		rows = append(rows, kvRow{Key: f.Label, Value: metricValueText(f.Key, v)})
+	}
+	if len(m) > 0 { // 未识别字段兜底展开（嵌套对象 "父.子"、数组 "键[下标]"）
+		extra := make([]kvRow, 0, len(m))
+		flattenValue(&extra, "", m)
+		rows = append(rows, extra...)
+	}
+	return rows
+}
+
+// metricValueText 按字段语义格式化 additional_data 标量值（补单位）；非常规值回退 fmtUciValue。
+func metricValueText(key string, v any) string {
+	f, ok := numToFloat(v)
+	if !ok {
+		return fmtUciValue(v)
+	}
+	switch key {
+	case "cpu_temp":
+		return fmt.Sprintf("%.1f ℃", f)
+	case "mem_total", "mem_free", "disk_total", "disk_free":
+		return fmtKB(uint64(f))
+	case "net_rx_bytes", "net_tx_bytes":
+		return fmtBytes(uint64(f))
+	}
+	return fmtUciValue(v)
+}
+
+// numToFloat 将 JSON 反序列化后的数值统一转为 float64。
+func numToFloat(v any) (float64, bool) {
+	switch t := v.(type) {
+	case float64:
+		return t, true
+	case float32:
+		return float64(t), true
+	case int:
+		return float64(t), true
+	case int64:
+		return float64(t), true
+	case json.Number:
+		if f, err := t.Float64(); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
+}
+
+// fmtKB 将以 KB 为单位的容量人性化显示（KB/MB/GB）。
+func fmtKB(kb uint64) string {
+	const unit = 1024
+	switch {
+	case kb >= unit*unit:
+		return fmt.Sprintf("%.1f GB", float64(kb)/float64(unit*unit))
+	case kb >= unit:
+		return fmt.Sprintf("%.1f MB", float64(kb)/float64(unit))
+	default:
+		return fmt.Sprintf("%d KB", kb)
+	}
+}
+
+func flattenValue(rows *[]kvRow, prefix string, v any) {
+	switch t := v.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(t))
+		for k := range t {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			key := k
+			if prefix != "" {
+				key = prefix + "." + k
+			}
+			flattenValue(rows, key, t[k])
+		}
+	case []any:
+		if len(t) == 0 {
+			*rows = append(*rows, kvRow{Key: prefix, Value: "（空）"})
+			return
+		}
+		for i, e := range t {
+			flattenValue(rows, fmt.Sprintf("%s[%d]", prefix, i), e)
+		}
+	default:
+		key := prefix
+		if key == "" {
+			key = "值"
+		}
+		*rows = append(*rows, kvRow{Key: key, Value: fmtUciValue(v)})
+	}
+}
+
+// lanIPFromIfaces 取内网管理 IP：逻辑接口 lan 的首个 IPv4（去掩码与多余地址）。
+func lanIPFromIfaces(ifs []netIfaceRow) string {
+	for _, it := range ifs {
+		if it.Name != "lan" || it.IPv4 == "" {
+			continue
+		}
+		first := strings.SplitN(it.IPv4, ",", 2)[0]
+		return strings.SplitN(strings.TrimSpace(first), "/", 2)[0]
+	}
+	return ""
 }
 
 // handleDeviceConfig 渲染设备配置页。
@@ -397,13 +571,19 @@ func (a *App) handleDeviceConfig(c *gin.Context) {
 	pg := deviceConfigPage{
 		pageBase:  pageBase{ActiveMenu: "devices", CurrentUser: u, Config: a.Cfg},
 		Device:    dev,
+		Host:      a.Cfg.DeviceHost(dev.SessionID),
+		Serial:    dev.DeviceID, // 默认降级；在线时用 system.board 序列号覆盖
 		FlashOK:   c.Query("ok"),
 		FlashErr:  c.Query("err"),
 		ActiveTab: c.DefaultQuery("tab", "overview"),
 	}
 
 	var errs []string
-	if dev.SessionID == "" || dev.Status != "online" {
+	if c.Query("rebooting") == "1" {
+		// 刚下发重启：设备重启窗口内隧道不可达，跳过全部 UBUS 拉取，仅提示“重启中”
+		pg.Restarting = true
+		a.Log.Info("device config: skip ubus while rebooting", "device_id", deviceID)
+	} else if dev.SessionID == "" || dev.Status != "online" {
 		errs = append(errs, "设备离线，无法获取配置")
 		a.Log.Info("device config: skip ubus for non-online device", "device_id", deviceID, "status", dev.Status)
 	} else {
@@ -413,6 +593,9 @@ func (a *App) handleDeviceConfig(c *gin.Context) {
 			errs = append(errs, "概览: "+oerr.Error())
 		} else {
 			pg.Overview = ov
+			if s := pickStr(ov.Board, "board_id", "serial", "serial_number", "boardname", "board_name"); s != "" {
+				pg.Serial = s
+			}
 		}
 		// network 配置 → LAN/WAN 分组（WAN 不存在 = 桥模式）
 		secs, nerr := fetchUciSections(ctx, a, dev.SessionID, "network")
@@ -428,6 +611,7 @@ func (a *App) handleDeviceConfig(c *gin.Context) {
 			errs = append(errs, "网络接口: "+ierr.Error())
 		} else {
 			pg.NetIfaces = ifs
+			pg.LanIP = lanIPFromIfaces(ifs)
 		}
 		// 主机表（luci-rpc getHostHints）
 		if hosts, herr := fetchHostHints(ctx, a, dev.SessionID); herr != nil {
@@ -456,6 +640,33 @@ func (a *App) handleDeviceConfig(c *gin.Context) {
 		} else {
 			pg.Logs = logs
 		}
+		// 无线接口列表（扫描 TAB 下拉用）
+		if ifs := a.Wireless.Interfaces(ctx, dev.SessionID); len(ifs) > 0 {
+			pg.WirelessIfs = ifs
+		} else {
+			pg.WirelessIfs = []string{"wlan0"}
+		}
+		// 扫描仅在 tab=scan 时拉取（iwinfo scan 较慢，避免拖慢其他 TAB）
+		if pg.ActiveTab == "scan" {
+			curIf := c.DefaultQuery("scan_if", "")
+			if curIf == "" || !containsStr(pg.WirelessIfs, curIf) {
+				curIf = pg.WirelessIfs[0]
+			}
+			pg.CurScanIf = curIf
+			if sc, serr := a.Wireless.Scan(ctx, dev.SessionID, curIf); serr != nil {
+				errs = append(errs, "无线扫描: "+serr.Error())
+			} else {
+				pg.Scan = formatScanResults(sc)
+			}
+		}
+	}
+	// 状态快照（frps_helper 北向 additional_data，不依赖设备在线；以中文标签表格呈现）
+	pg.Snapshot = formatAdditionalData(dev.AdditionalData)
+	// 固件列表（从磁盘读取，不依赖设备在线）
+	if fw, ferr := a.fetchFirmwareList(c.Request.Context(), dev); ferr != nil {
+		errs = append(errs, "固件列表: "+ferr.Error())
+	} else {
+		pg.Firmware = fw
 	}
 	if len(errs) > 0 {
 		pg.Error = strings.Join(errs, "；")
@@ -589,8 +800,11 @@ func fetchClients(ctx context.Context, a *App, sessionID string) ([]clientRow, e
 	return rows, nil
 }
 
-// fetchLogs 调用 ubus log read 获取系统日志（lines 行）。
-// 响应为 {"log":[{"time":...,"facility":...,"msg":...}]} 或纯字符串行。
+// fetchLogs 读取设备系统日志。
+// 优先走 MonkFish AP 固件的 ubus mk.aplogs.logs（实测该固件标准 logd 缓冲为空、log.read 无数据）；
+// 该对象不存在时回退标准 OpenWrt 的 log.read。
+// log.read 兼容两种响应：{"log":[...]}（标准 logd）与直接数组 [...]（部分定制固件）；
+// 带 lines 返回空时回退无参重试一次（部分固件不支持 lines 过滤）。
 func fetchLogs(ctx context.Context, a *App, sessionID string, lines int) ([]logLine, error) {
 	if lines <= 0 {
 		lines = 200
@@ -598,25 +812,102 @@ func fetchLogs(ctx context.Context, a *App, sessionID string, lines int) ([]logL
 	if lines > 1000 {
 		lines = 1000
 	}
-	var resp struct {
-		Log []struct {
-			Time     int64  `json:"time"`
-			Facility int    `json:"facility"`
-			Msg      string `json:"msg"`
-		} `json:"log"`
+	// 1) MonkFish AP：ubus mk.aplogs logs
+	if raw, err := a.Ubus.Call(ctx, sessionID, "mk.aplogs", "logs", map[string]any{"tab": "all"}); err == nil {
+		if out, ok := parseAPLogs(raw, lines); ok {
+			return out, nil
+		}
 	}
-	if err := a.Ubus.CallInto(ctx, sessionID, "log", "read", &resp, map[string]any{"lines": lines}); err != nil {
+	// 2) 回退：标准 OpenWrt log.read
+	raw, err := a.Ubus.Call(ctx, sessionID, "log", "read", map[string]any{"lines": lines})
+	if err != nil {
 		return nil, err
 	}
-	out := make([]logLine, 0, len(resp.Log))
-	for _, e := range resp.Log {
+	entries := parseLogEntries(raw)
+	if len(entries) == 0 {
+		// 回退：不带参数调用
+		raw2, err2 := a.Ubus.Call(ctx, sessionID, "log", "read", map[string]any{})
+		if err2 != nil {
+			return nil, err2
+		}
+		entries = parseLogEntries(raw2)
+	}
+	out := make([]logLine, 0, len(entries))
+	for _, e := range entries {
 		out = append(out, logLine{
-			Time:     fmtUnixTime(e.Time),
-			Facility: facilityName(e.Facility),
-			Message:  e.Msg,
+			Time:    fmtUnixTime(e.Time),
+			Level:   facilityName(e.Facility),
+			Message: e.Msg,
 		})
 	}
 	return out, nil
+}
+
+// parseAPLogs 解析 MonkFish AP（ubus mk.aplogs.logs）响应，取最近 lines 条：
+// {"logs":[{"time":"12:13:06","level_label":"INFO","level":"info","msg":"..."}, ...], "total":N, ...}。
+// ok=false 表示响应不含 logs 结构（调用方应回退 log.read）。
+func parseAPLogs(raw json.RawMessage, lines int) ([]logLine, bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, false
+	}
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return nil, false
+	}
+	if _, ok := probe["logs"]; !ok {
+		return nil, false
+	}
+	var resp struct {
+		Logs []struct {
+			Time       string `json:"time"`
+			LevelLabel string `json:"level_label"`
+			Level      string `json:"level"`
+			Msg        string `json:"msg"`
+		} `json:"logs"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, false
+	}
+	items := resp.Logs
+	if lines > 0 && len(items) > lines {
+		items = items[len(items)-lines:]
+	}
+	out := make([]logLine, 0, len(items))
+	for _, it := range items {
+		lv := it.LevelLabel
+		if lv == "" {
+			lv = strings.ToUpper(it.Level)
+		}
+		out = append(out, logLine{Time: it.Time, Level: lv, Message: it.Msg})
+	}
+	return out, true
+}
+
+// logEntry 日志条目原始结构。
+type logEntry struct {
+	Time     int64  `json:"time"`
+	Facility int    `json:"facility"`
+	Msg      string `json:"msg"`
+}
+
+// parseLogEntries 从 ubus 原始响应中解析日志条目，兼容 {"log":[...]} 和 [...] 两种格式。
+func parseLogEntries(raw json.RawMessage) []logEntry {
+	if len(raw) == 0 || string(raw) == "null" || string(raw) == "{}" {
+		return nil
+	}
+	// 尝试 {"log": [...]}
+	var wrapped struct {
+		Log []logEntry `json:"log"`
+	}
+	if err := json.Unmarshal(raw, &wrapped); err == nil && len(wrapped.Log) > 0 {
+		return wrapped.Log
+	}
+	// 尝试直接数组 [...]
+	var arr []logEntry
+	if err := json.Unmarshal(raw, &arr); err == nil && len(arr) > 0 {
+		return arr
+	}
+	return nil
 }
 
 // fmtUnixTime 将 unix 时间戳格式化为 "2006-01-02 15:04:05"（设备本地时区）。
@@ -961,19 +1252,6 @@ func (a *App) handleDeviceConfigRadioEdit(c *gin.Context) {
 	okMsg := func(msg string) { c.Redirect(http.StatusFound, back+"&ok="+url.QueryEscape(msg)) }
 	errMsg := func(msg string) { c.Redirect(http.StatusFound, back+"&err="+url.QueryEscape(msg)) }
 
-	u, _ := auth.CurrentUser(c)
-	audit := func(ok bool, detail map[string]any) {
-		action := "wireless.radio_edit_failed"
-		if ok {
-			action = "wireless.radio_edit"
-		}
-		_ = store.RecordAudit(a.DB, store.AuditEntry{
-			UserID: u.ID, Username: u.Username, Action: action,
-			Target: deviceID, Detail: detail,
-			IP: c.ClientIP(), UserAgent: c.Request.UserAgent(),
-		})
-	}
-
 	radio := c.PostForm("radio")
 	if radio == "" {
 		errMsg("缺少 radio 参数")
@@ -988,7 +1266,6 @@ func (a *App) handleDeviceConfigRadioEdit(c *gin.Context) {
 	// 校验 section 存在且为 wifi-device（不信任前端提交的 radio 名）
 	secs, err := fetchUciSections(ctx, a, dev.SessionID, "wireless")
 	if err != nil {
-		audit(false, map[string]any{"radio": radio, "step": "uci.get wireless", "err": err.Error()})
 		errMsg("读取无线配置失败: " + err.Error())
 		return
 	}
@@ -1000,7 +1277,6 @@ func (a *App) handleDeviceConfigRadioEdit(c *gin.Context) {
 		}
 	}
 	if cur == nil {
-		audit(false, map[string]any{"radio": radio, "step": "validate", "err": "unknown section"})
 		errMsg("未知的无线网卡：" + radio)
 		return
 	}
@@ -1036,7 +1312,6 @@ func (a *App) handleDeviceConfigRadioEdit(c *gin.Context) {
 		}
 		prefix, ok := htModePrefix[mode]
 		if !ok {
-			audit(false, map[string]any{"radio": radio, "step": "validate", "err": "invalid mode " + mode})
 			errMsg("无效的无线模式：" + mode)
 			return
 		}
@@ -1064,7 +1339,6 @@ func (a *App) handleDeviceConfigRadioEdit(c *gin.Context) {
 	if len(values) > 0 {
 		if err := a.Ubus.CallWriteInto(ctx, dev.SessionID, "uci", "set", &map[string]any{},
 			map[string]any{"config": "wireless", "section": radio, "values": values}); err != nil {
-			audit(false, map[string]any{"radio": radio, "step": "uci.set", "values": values, "err": err.Error()})
 			errMsg("uci.set 失败: " + err.Error())
 			return
 		}
@@ -1073,7 +1347,6 @@ func (a *App) handleDeviceConfigRadioEdit(c *gin.Context) {
 	for _, opt := range delOpts {
 		if err := a.Ubus.CallWriteInto(ctx, dev.SessionID, "uci", "delete", &map[string]any{},
 			map[string]any{"config": "wireless", "section": radio, "option": opt}); err != nil {
-			audit(false, map[string]any{"radio": radio, "step": "uci.delete", "option": opt, "err": err.Error()})
 			errMsg("uci.delete " + opt + " 失败: " + err.Error())
 			return
 		}
@@ -1089,12 +1362,7 @@ func (a *App) handleDeviceConfigRadioEdit(c *gin.Context) {
 
 	// 4) 生效降级链（与 SSID 编辑共用，见 finalizeWirelessApply）：
 	//    ① uci.apply {rollback:true,timeout:30} + confirm；② 降级 uci.commit + network.reload；③ 仍失败报告暂存状态。
-	path, msg, detail, ok := a.finalizeWirelessApply(ctx, dev.SessionID, deviceID)
-	auditDetail := map[string]any{"radio": radio, "values": values, "deleted": delOpts, "applied": path}
-	if detail != "" {
-		auditDetail["detail"] = detail
-	}
-	audit(ok, auditDetail)
+	_, msg, _, ok := a.finalizeWirelessApply(ctx, dev.SessionID, deviceID)
 	if ok {
 		okMsg(radio + "：" + msg)
 	} else {
@@ -1191,19 +1459,6 @@ func (a *App) handleDeviceConfigSSIDEdit(c *gin.Context) {
 	okMsg := func(msg string) { c.Redirect(http.StatusFound, back+"&ok="+url.QueryEscape(msg)) }
 	errMsg := func(msg string) { c.Redirect(http.StatusFound, back+"&err="+url.QueryEscape(msg)) }
 
-	u, _ := auth.CurrentUser(c)
-	audit := func(ok bool, detail map[string]any) {
-		action := "wireless.ssid_edit_failed"
-		if ok {
-			action = "wireless.ssid_edit"
-		}
-		_ = store.RecordAudit(a.DB, store.AuditEntry{
-			UserID: u.ID, Username: u.Username, Action: action,
-			Target: deviceID, Detail: detail,
-			IP: c.ClientIP(), UserAgent: c.Request.UserAgent(),
-		})
-	}
-
 	radio := c.PostForm("radio")
 	section := strings.TrimSpace(c.PostForm("section")) // 空 = 新增
 	ssid := strings.TrimSpace(c.PostForm("ssid"))
@@ -1273,7 +1528,6 @@ func (a *App) handleDeviceConfigSSIDEdit(c *gin.Context) {
 	// 读取 wireless 配置做服务端校验（不信任前端提交的 section/radio 名）
 	secs, err := fetchUciSections(ctx, a, dev.SessionID, "wireless")
 	if err != nil {
-		audit(false, map[string]any{"section": section, "radio": radio, "step": "uci.get wireless", "err": err.Error()})
 		errMsg("读取无线配置失败: " + err.Error())
 		return
 	}
@@ -1290,18 +1544,15 @@ func (a *App) handleDeviceConfigSSIDEdit(c *gin.Context) {
 		}
 	}
 	if radioSec == nil {
-		audit(false, map[string]any{"section": section, "radio": radio, "step": "validate", "err": "unknown radio"})
 		errMsg("未知的无线网卡：" + radio)
 		return
 	}
 	if !isAdd {
 		if cur == nil {
-			audit(false, map[string]any{"section": section, "radio": radio, "step": "validate", "err": "unknown section"})
 			errMsg("未知的 SSID section：" + section)
 			return
 		}
 		if devName := secField(*cur, "device"); devName != radio {
-			audit(false, map[string]any{"section": section, "radio": radio, "step": "validate", "err": "section belongs to " + devName})
 			errMsg("SSID " + section + " 不属于网卡 " + radio + "（实际属于 " + devName + "）")
 			return
 		}
@@ -1429,7 +1680,6 @@ func (a *App) handleDeviceConfigSSIDEdit(c *gin.Context) {
 	if isAdd {
 		if err := a.Ubus.CallWriteInto(ctx, dev.SessionID, "uci", "add", &map[string]any{},
 			map[string]any{"config": "wireless", "type": "wifi-iface", "name": addName, "values": values}); err != nil {
-			audit(false, map[string]any{"op": "add", "radio": radio, "name": addName, "values": values, "step": "uci.add", "err": err.Error()})
 			errMsg("uci.add 失败: " + err.Error())
 			return
 		}
@@ -1437,7 +1687,6 @@ func (a *App) handleDeviceConfigSSIDEdit(c *gin.Context) {
 		if len(values) > 0 {
 			if err := a.Ubus.CallWriteInto(ctx, dev.SessionID, "uci", "set", &map[string]any{},
 				map[string]any{"config": "wireless", "section": section, "values": values}); err != nil {
-				audit(false, map[string]any{"section": section, "radio": radio, "values": values, "step": "uci.set", "err": err.Error()})
 				errMsg("uci.set 失败: " + err.Error())
 				return
 			}
@@ -1445,7 +1694,6 @@ func (a *App) handleDeviceConfigSSIDEdit(c *gin.Context) {
 		for _, opt := range delOpts {
 			if err := a.Ubus.CallWriteInto(ctx, dev.SessionID, "uci", "delete", &map[string]any{},
 				map[string]any{"config": "wireless", "section": section, "option": opt}); err != nil {
-				audit(false, map[string]any{"section": section, "radio": radio, "step": "uci.delete", "option": opt, "err": err.Error()})
 				errMsg("uci.delete " + opt + " 失败: " + err.Error())
 				return
 			}
@@ -1461,19 +1709,7 @@ func (a *App) handleDeviceConfigSSIDEdit(c *gin.Context) {
 	}
 
 	// 生效降级链（与 radio 编辑共用，见 finalizeWirelessApply）
-	path, msg, detail, ok := a.finalizeWirelessApply(ctx, dev.SessionID, deviceID)
-	auditDetail := map[string]any{"section": section, "radio": radio, "values": values, "applied": path}
-	if isAdd {
-		auditDetail["op"] = "add"
-		auditDetail["name"] = addName
-	}
-	if len(delOpts) > 0 {
-		auditDetail["deleted"] = delOpts
-	}
-	if detail != "" {
-		auditDetail["detail"] = detail
-	}
-	audit(ok, auditDetail)
+	_, msg, _, ok := a.finalizeWirelessApply(ctx, dev.SessionID, deviceID)
 	if ok {
 		if isAdd {
 			okMsg("SSID「" + ssid + "」已新增：" + msg)
@@ -1506,19 +1742,6 @@ func (a *App) handleDeviceConfigSSIDDelete(c *gin.Context) {
 	okMsg := func(msg string) { c.Redirect(http.StatusFound, back+"&ok="+url.QueryEscape(msg)) }
 	errMsg := func(msg string) { c.Redirect(http.StatusFound, back+"&err="+url.QueryEscape(msg)) }
 
-	u, _ := auth.CurrentUser(c)
-	audit := func(ok bool, detail map[string]any) {
-		action := "wireless.ssid_delete_failed"
-		if ok {
-			action = "wireless.ssid_delete"
-		}
-		_ = store.RecordAudit(a.DB, store.AuditEntry{
-			UserID: u.ID, Username: u.Username, Action: action,
-			Target: deviceID, Detail: detail,
-			IP: c.ClientIP(), UserAgent: c.Request.UserAgent(),
-		})
-	}
-
 	section := strings.TrimSpace(c.PostForm("section"))
 	if section == "" {
 		section = strings.TrimSpace(c.Query("section"))
@@ -1536,7 +1759,6 @@ func (a *App) handleDeviceConfigSSIDDelete(c *gin.Context) {
 	// 校验 section 存在且为 wifi-iface
 	secs, err := fetchUciSections(ctx, a, dev.SessionID, "wireless")
 	if err != nil {
-		audit(false, map[string]any{"section": section, "step": "uci.get wireless", "err": err.Error()})
 		errMsg("读取无线配置失败: " + err.Error())
 		return
 	}
@@ -1552,7 +1774,6 @@ func (a *App) handleDeviceConfigSSIDDelete(c *gin.Context) {
 		}
 	}
 	if !found {
-		audit(false, map[string]any{"section": section, "step": "validate", "err": "unknown section"})
 		errMsg("未知的 SSID section：" + section)
 		return
 	}
@@ -1560,7 +1781,6 @@ func (a *App) handleDeviceConfigSSIDDelete(c *gin.Context) {
 	// uci.delete 删除整个 wifi-iface section
 	if err := a.Ubus.CallWriteInto(ctx, dev.SessionID, "uci", "delete", &map[string]any{},
 		map[string]any{"config": "wireless", "section": section}); err != nil {
-		audit(false, map[string]any{"section": section, "step": "uci.delete", "err": err.Error()})
 		errMsg("uci.delete 失败: " + err.Error())
 		return
 	}
@@ -1574,12 +1794,7 @@ func (a *App) handleDeviceConfigSSIDDelete(c *gin.Context) {
 	}
 
 	// 生效降级链（与 radio/SSID 编辑共用）
-	path, msg, detail, ok := a.finalizeWirelessApply(ctx, dev.SessionID, deviceID)
-	auditDetail := map[string]any{"section": section, "ssid": ssidName, "applied": path}
-	if detail != "" {
-		auditDetail["detail"] = detail
-	}
-	audit(ok, auditDetail)
+	_, msg, _, ok := a.finalizeWirelessApply(ctx, dev.SessionID, deviceID)
 	if ok {
 		okMsg("SSID「" + ssidName + "」已删除：" + msg)
 	} else {
@@ -1618,21 +1833,12 @@ func (a *App) handleDeviceReboot(c *gin.Context) {
 		return
 	}
 	back := "/devices/" + deviceID + "/config?tab=overview"
-	okMsg := func(msg string) { c.Redirect(http.StatusFound, back+"&ok="+url.QueryEscape(msg)) }
-	errMsg := func(msg string) { c.Redirect(http.StatusFound, back+"&err="+url.QueryEscape(msg)) }
-
-	u, _ := auth.CurrentUser(c)
-	audit := func(ok bool, detail map[string]any) {
-		action := "device.reboot_failed"
-		if ok {
-			action = "device.reboot"
-		}
-		_ = store.RecordAudit(a.DB, store.AuditEntry{
-			UserID: u.ID, Username: u.Username, Action: action,
-			Target: deviceID, Detail: detail,
-			IP: c.ClientIP(), UserAgent: c.Request.UserAgent(),
-		})
+	// 重启成功回显带 rebooting=1：配置页据此跳过 UBUS 拉取并提示“重启中”，
+	// 避免设备重启窗口内（隧道已断、frps_helper 仍报 online）frps 的 404 页面刷屏。
+	okMsg := func(msg string) {
+		c.Redirect(http.StatusFound, back+"&ok="+url.QueryEscape(msg)+"&rebooting=1")
 	}
+	errMsg := func(msg string) { c.Redirect(http.StatusFound, back+"&err="+url.QueryEscape(msg)) }
 
 	if dev.SessionID == "" || dev.Status != "online" {
 		errMsg("设备离线，无法重启")
@@ -1641,11 +1847,9 @@ func (a *App) handleDeviceReboot(c *gin.Context) {
 	ctx := c.Request.Context()
 	_, rerr := a.Ubus.CallWrite(ctx, dev.SessionID, "system", "reboot", map[string]any{})
 	if rerr != nil {
-		audit(false, map[string]any{"err": rerr.Error()})
 		errMsg("重启失败: " + rerr.Error())
 		return
 	}
-	audit(true, nil)
 	okMsg("重启指令已下发，设备将在数秒后重启（约 1-2 分钟后恢复在线）")
 }
 
@@ -1661,19 +1865,6 @@ func (a *App) handleDeviceKickClient(c *gin.Context) {
 	back := "/devices/" + deviceID + "/config?tab=clients"
 	okMsg := func(msg string) { c.Redirect(http.StatusFound, back+"&ok="+url.QueryEscape(msg)) }
 	errMsg := func(msg string) { c.Redirect(http.StatusFound, back+"&err="+url.QueryEscape(msg)) }
-
-	u, _ := auth.CurrentUser(c)
-	audit := func(ok bool, detail map[string]any) {
-		action := "wireless.kick_failed"
-		if ok {
-			action = "wireless.kick"
-		}
-		_ = store.RecordAudit(a.DB, store.AuditEntry{
-			UserID: u.ID, Username: u.Username, Action: action,
-			Target: deviceID, Detail: detail,
-			IP: c.ClientIP(), UserAgent: c.Request.UserAgent(),
-		})
-	}
 
 	ifname := strings.TrimSpace(c.PostForm("ifname"))
 	mac := strings.ToLower(strings.TrimSpace(c.PostForm("mac")))
@@ -1693,7 +1884,6 @@ func (a *App) handleDeviceKickClient(c *gin.Context) {
 	// ifname 白名单校验：必须是设备当前无线接口，防任意 ifname 探测
 	ifaces := a.Wireless.Interfaces(ctx, dev.SessionID)
 	if !containsStr(ifaces, ifname) {
-		audit(false, map[string]any{"ifname": ifname, "mac": mac, "err": "ifname not in device wireless ifaces"})
 		errMsg("ifname 不是该设备的无线接口：" + ifname)
 		return
 	}
@@ -1704,10 +1894,234 @@ func (a *App) handleDeviceKickClient(c *gin.Context) {
 		"deauth":   true,
 		"disassoc": true,
 	}); kerr != nil {
-		audit(false, map[string]any{"ifname": ifname, "mac": mac, "err": kerr.Error()})
 		errMsg("踢下线失败: " + kerr.Error())
 		return
 	}
-	audit(true, map[string]any{"ifname": ifname, "mac": mac})
 	okMsg(fmt.Sprintf("已踢下线客户端 %s（接口 %s），60 秒内禁止重新接入", mac, ifname))
+}
+
+// fetchFirmwareList 获取设备固件升级 TAB 数据：当前固件版本 + 固件库可用列表。
+func (a *App) fetchFirmwareList(ctx context.Context, dev *frpsclient.Device) (*firmwarePage, error) {
+	pg := &firmwarePage{
+		FirmwareRoot: a.Firmware.Root(),
+	}
+	// 设备在线时拉取当前固件版本与型号；离线时仅返回固件库列表
+	if dev.SessionID != "" && dev.Status == "online" {
+		var board map[string]any
+		if err := a.Ubus.CallInto(ctx, dev.SessionID, "system", "board", &board, map[string]any{}); err != nil {
+			a.Log.Warn("firmware: system.board failed", "device_id", dev.DeviceID, "err", err)
+		} else {
+			pg.Model = mapStr(board, "model")
+			var rel struct {
+				Release struct {
+					Distribution string `json:"distribution"`
+					Version      string `json:"version"`
+					Revision     string `json:"revision"`
+				} `json:"release"`
+			}
+			raw, _ := json.Marshal(board["release"])
+			_ = json.Unmarshal(raw, &rel.Release)
+			pg.CurrentVersion = strings.TrimSpace(rel.Release.Distribution + " " + rel.Release.Version + " " + rel.Release.Revision)
+		}
+	}
+	pg.ModelDir = a.Firmware.ModelDirName(pg.Model)
+	entries, err := a.Firmware.List(pg.Model)
+	if err != nil {
+		return nil, err
+	}
+	pg.Entries = entries
+	return pg, nil
+}
+
+// handleDeviceFirmwareUpgrade 固件升级（POST /devices/:id/config/firmware/upgrade）。
+// 流程：固件库校验 → 服务端校验和 → cgi-io 上传 /tmp/firmware.bin →
+// [普通升级] sysupgrade --test → sysupgrade 执行。
+// 设备收到升级指令后自动重启（约 2-5 分钟），隧道中断属预期行为，按「已下发」应答。
+func (a *App) handleDeviceFirmwareUpgrade(c *gin.Context) {
+	deviceID := c.Param("id")
+	dev, err := a.Frps.GetDevice(c.Request.Context(), deviceID)
+	if err != nil {
+		c.String(http.StatusNotFound, "设备未找到：%s", deviceID)
+		return
+	}
+	back := "/devices/" + deviceID + "/config?tab=firmware"
+	okMsg := func(msg string) { c.Redirect(http.StatusFound, back+"&ok="+url.QueryEscape(msg)) }
+	errMsg := func(msg string) { c.Redirect(http.StatusFound, back+"&err="+url.QueryEscape(msg)) }
+
+	filename := strings.TrimSpace(c.PostForm("filename"))
+	force := c.PostForm("force") == "1"
+	keepConfig := c.PostForm("keep_config") != "0" // 默认保留配置
+
+	if filename == "" {
+		errMsg("缺少固件文件名")
+		return
+	}
+	if dev.SessionID == "" || dev.Status != "online" {
+		errMsg("设备离线，无法升级")
+		return
+	}
+	ctx := c.Request.Context()
+
+	// 获取设备硬件型号（用于定位固件库目录）
+	var board map[string]any
+	if err := a.Ubus.CallInto(ctx, dev.SessionID, "system", "board", &board, map[string]any{}); err != nil {
+		errMsg("获取设备型号失败: " + err.Error())
+		return
+	}
+	model := mapStr(board, "model")
+
+	// 1. 固件库校验
+	f, _, desc, err := a.Firmware.Open(model, filename)
+	if err != nil {
+		errMsg(err.Error())
+		return
+	}
+	defer f.Close()
+
+	// 2. 服务端实算校验和
+	if ok, verr := firmware.VerifyChecksum(f, desc); verr != nil {
+		errMsg("计算固件校验和失败: " + verr.Error())
+		return
+	} else if !ok {
+		errMsg("固件文件校验和与说明文件不一致（固件库文件可能已损坏），已拒绝升级")
+		return
+	}
+
+	// 3. 上传到设备 /tmp/firmware.bin
+	up, uperr := a.Ubus.CGIUpload(ctx, dev.SessionID, "/tmp/firmware.bin", f)
+	if uperr != nil {
+		errMsg("固件上传失败: " + uperr.Error())
+		return
+	}
+	// 设备端校验和复核
+	if localMD5 := firmware.FileMD5Hex(f); up.Checksum != "" && !strings.EqualFold(localMD5, up.Checksum) {
+		errMsg(fmt.Sprintf("固件上传后设备端校验和与本地不一致（%s ≠ %s）", localMD5, up.Checksum))
+		return
+	}
+
+	// 4. 镜像兼容性校验。MonkFish/NatShell 固件的自定义 apui ACL 只放行 mk.apupgrade.verify/flash，
+	//    不放行 file.exec，故优先走 mk.apupgrade；标准 OpenWrt 固件无该对象时回退 sysupgrade --test。
+	useCustom := a.hasAPUpgrade(ctx, dev.SessionID)
+
+	if !force {
+		if useCustom {
+			var vr struct {
+				Valid  bool   `json:"valid"`
+				Output string `json:"output"`
+				Error  string `json:"error"`
+			}
+			if err := a.Ubus.CallWriteInto(ctx, dev.SessionID, "mk.apupgrade", "verify", &vr, map[string]any{}); err != nil {
+				errMsg("镜像校验失败: " + err.Error())
+				return
+			}
+			if vr.Error != "" {
+				errMsg("镜像校验失败: " + vr.Error)
+				return
+			}
+			if !vr.Valid {
+				errMsg("镜像校验未通过（" + strings.TrimSpace(vr.Output) + "）。若确认固件与设备型号匹配，可尝试强制升级。")
+				return
+			}
+		} else {
+			var execResp struct {
+				Code   int    `json:"code"`
+				Stdout string `json:"stdout"`
+				Stderr string `json:"stderr"`
+			}
+			if err := a.Ubus.CallWriteInto(ctx, dev.SessionID, "file", "exec", &execResp, map[string]any{
+				"command": "/sbin/sysupgrade",
+				"params":  []string{"--test", "/tmp/firmware.bin"},
+			}); err != nil {
+				errMsg("镜像校验失败: " + err.Error())
+				return
+			}
+			if execResp.Code != 0 {
+				msg := strings.TrimSpace(execResp.Stderr + execResp.Stdout)
+				errMsg("镜像校验未通过（" + msg + "）。若确认固件与设备型号匹配，可尝试强制升级。")
+				return
+			}
+		}
+	}
+
+	mode := "普通升级"
+	if force {
+		mode = "强制升级"
+	}
+	if !keepConfig {
+		mode += "（不保留配置）"
+	}
+
+	// 5. 执行升级（设备自动重启；隧道中断=升级进行中的预期表现）
+	if useCustom {
+		// mk.apupgrade.flash 需确认词 FLASH；ucode 内部以后台 setsid 启动 sysupgrade 后立即返回。
+		// 注意：该固件的 flash 固定执行 `sysupgrade -v`（保留配置、不支持 --force），
+		// 传入的 keep 仅作回显，无法改变设备行为，故「不保留配置」时明确提示用户。
+		keep := 1
+		if !keepConfig {
+			keep = 0
+		}
+		var fr struct {
+			Message string `json:"message"`
+			Error   string `json:"error"`
+		}
+		flashErr := a.Ubus.CallWriteInto(ctx, dev.SessionID, "mk.apupgrade", "flash", &fr, map[string]any{
+			"confirm": "FLASH",
+			"keep":    keep,
+		})
+		note := ""
+		if !keepConfig {
+			note = "（注意：当前设备固件不支持「不保留配置」，将保留配置）"
+		}
+		if flashErr != nil {
+			okMsg(mode + "指令已下发（设备响应未确认：" + clipText(flashErr.Error()) + "）" + note + "。设备正在写入固件并即将重启（约 0.5-2 分钟），期间设备将离线，完成后请刷新页面确认")
+			return
+		}
+		if fr.Error != "" {
+			errMsg("固件刷写失败: " + fr.Error)
+			return
+		}
+		okMsg(mode + "已下发" + note + "，设备将自动重启并短暂离线（约 0.5-2 分钟），完成后请刷新页面确认")
+		return
+	}
+
+	// 标准 OpenWrt 回退：file.exec 执行 sysupgrade（白名单命令）
+	params := []string{}
+	if !keepConfig {
+		params = append(params, "-n")
+	}
+	if force {
+		params = append(params, "--force")
+	}
+	params = append(params, "/tmp/firmware.bin")
+	_, execErr := a.Ubus.CallWrite(ctx, dev.SessionID, "file", "exec", map[string]any{
+		"command": "/sbin/sysupgrade",
+		"params":  params,
+	})
+	if execErr != nil {
+		// 升级指令已发出，设备断网属预期行为，按"已下发未确认"处理
+		okMsg(mode + "指令已下发（设备响应未确认：" + clipText(execErr.Error()) + "）。设备正在写入固件并即将重启（约 2-5 分钟），期间设备将离线，完成后请刷新页面确认")
+		return
+	}
+	okMsg(mode + "已下发，设备将自动重启并短暂离线（约 2-5 分钟），完成后请刷新页面确认")
+}
+
+// hasAPUpgrade 探测设备是否提供自定义 mk.apupgrade 对象（写方法 verify/flash/discard）。
+// MonkFish/NatShell 固件的 apui ACL 仅放行该对象而不放行 file.exec，固件升级必须走它；
+// 标准 OpenWrt 固件无此对象，回退 file.exec。探测失败仅表示不可用，不视为错误。
+func (a *App) hasAPUpgrade(ctx context.Context, sessionID string) bool {
+	var info map[string]any
+	if err := a.Ubus.CallInto(ctx, sessionID, "mk.apupgrade", "info", &info, map[string]any{}); err != nil {
+		a.Log.Info("firmware: mk.apupgrade unavailable, fallback to file.exec", "session_id", sessionID, "err", err)
+		return false
+	}
+	return len(info) > 0
+}
+
+// clipText 错误文案截断（嵌入 message 前），避免超长堆栈文本。
+func clipText(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 120 {
+		return s[:120] + "…"
+	}
+	return s
 }

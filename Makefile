@@ -33,10 +33,13 @@ vet:
 	go vet ./...
 
 # build 是 .PHONY，每次都重编；$(OUT_DIR) 仅在缺失时创建。
+# 模板从文件系统读取（非 embed），必须随二进制一起部署，故 build 时同步 templates/。
 build: $(OUT_DIR)
 	$(ENV) go build $(GOFLAGS) -o $(OUT) $(PKG)
 	@cp -f config.yaml $(OUT_DIR)/config.yaml 2>/dev/null || \
 		echo "warn: config.yaml not found at project root"
+	@rm -rf $(OUT_DIR)/templates && cp -r templates $(OUT_DIR)/templates 2>/dev/null || \
+		echo "warn: templates dir not found at project root"
 	@echo "built: $(OUT)"
 
 $(OUT_DIR):
@@ -47,8 +50,9 @@ run: build
 	cd $(OUT_DIR) && ./$(BINARY)
 
 # Linux 上 go build 产物默认带 +x，tar 直接保留执行位。
+# 模板从文件系统读取，必须随包分发；打包含 templates/ 目录。
 package: build
-	cd $(OUT_DIR) && tar -czf $(TARNAME) $(BINARY) config.yaml
+	cd $(OUT_DIR) && tar -czf $(TARNAME) $(BINARY) config.yaml templates
 	@echo "packaged: $(OUT_DIR)/$(TARNAME)"
 
 clean:

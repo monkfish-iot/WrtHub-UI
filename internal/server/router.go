@@ -12,6 +12,9 @@ import (
 func Mount(r *gin.Engine, app *App) {
 	// 全局会话中间件：必须在所有使用 session 的路由前注册。
 	r.Use(auth.SessionMiddleware(app.Cfg.Server.SessionSecret))
+	// 全局操作日志中间件：拦截所有写操作（POST/PUT/DELETE/PATCH）统一落库。
+	// 必须在 SessionMiddleware 之后挂载（依赖会话读取操作人身份）。
+	r.Use(oplogMiddleware(app))
 
 	// 静态资源：/assets/* 不受 RequireAuth 保护（登录页也需要 Bootstrap/htmx）。
 	registerAssetsRoutes(r, app)
@@ -36,6 +39,8 @@ func Mount(r *gin.Engine, app *App) {
 	protected.POST("/devices/:id/config/reboot", auth.RequirePermission(app.DB, "device:write"), app.handleDeviceReboot)
 	// 踢无线客户端下线（hostapd del_client），写操作需 wireless:write。
 	protected.POST("/devices/:id/config/clients/kick", auth.RequirePermission(app.DB, "wireless:write"), app.handleDeviceKickClient)
+	// 固件升级（cgi-io 上传 + sysupgrade），写操作需 device:write。
+	protected.POST("/devices/:id/config/firmware/upgrade", auth.RequirePermission(app.DB, "device:write"), app.handleDeviceFirmwareUpgrade)
 	// 无线网卡参数编辑（uci.set + uci.apply rollback，见 无线配置功能开发文档.md §5.3）。
 	protected.POST("/devices/:id/config/wireless/radio", auth.RequirePermission(app.DB, "wireless:write"), app.handleDeviceConfigRadioEdit)
 	// SSID 新增/编辑（section 空 = uci.add，否则 uci.set）与删除（uci.delete），见 §5.3 / §3.4 抓包参考。
@@ -48,5 +53,5 @@ func Mount(r *gin.Engine, app *App) {
 	})
 	// /users 占位（用户管理 UI 待实现，见部署手册 §13；现阶段先避免菜单点击 404）。
 	protected.GET("/users", auth.RequirePermission(app.DB, "user:read"), app.handleUsersPlaceholder)
-	protected.GET("/audit", auth.RequirePermission(app.DB, "audit:read"), app.handleAuditList)
+	protected.GET("/operation-logs", auth.RequirePermission(app.DB, "audit:read"), app.handleAuditList)
 }

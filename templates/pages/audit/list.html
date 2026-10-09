@@ -1,46 +1,105 @@
 {{define "content"}}
 <div class="d-flex justify-content-between align-items-center mb-2">
-    <h5 class="mb-0"><i class="fas fa-file-alt me-1"></i> 审计日志</h5>
+    <h5 class="mb-0"><i class="fas fa-clipboard-list me-1"></i> 操作日志</h5>
+</div>
+
+<div class="card shadow-sm mb-2">
+    <div class="card-body py-2">
+        <form method="get" action="/operation-logs" class="row g-2 align-items-end">
+            <div class="col-auto">
+                <label class="form-label mb-0 small text-muted">模块</label>
+                <input type="text" name="module" value="{{.Filters.Module}}" class="form-control form-control-sm" placeholder="devices" style="width:110px;">
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-0 small text-muted">动作</label>
+                <input type="text" name="action" value="{{.Filters.Action}}" class="form-control form-control-sm" placeholder="reboot" style="width:130px;">
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-0 small text-muted">操作人</label>
+                <input type="text" name="operator" value="{{.Filters.Operator}}" class="form-control form-control-sm" placeholder="用户名" style="width:120px;">
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-0 small text-muted">对象ID</label>
+                <input type="text" name="target_id" value="{{.Filters.TargetID}}" class="form-control form-control-sm" placeholder="设备ID" style="width:150px;">
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-0 small text-muted">结果</label>
+                <select name="result" class="form-select form-select-sm" style="width:100px;">
+                    <option value="" {{if eq .Filters.Result ""}}selected{{end}}>全部</option>
+                    <option value="success" {{if eq .Filters.Result "success"}}selected{{end}}>成功</option>
+                    <option value="fail" {{if eq .Filters.Result "fail"}}selected{{end}}>失败</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-0 small text-muted">起始日期</label>
+                <input type="date" name="time_from" value="{{.Filters.TimeFrom}}" class="form-control form-control-sm" style="width:140px;">
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-0 small text-muted">结束日期</label>
+                <input type="date" name="time_to" value="{{.Filters.TimeTo}}" class="form-control form-control-sm" style="width:140px;">
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-search"></i> 查询</button>
+                <a href="/operation-logs" class="btn btn-sm btn-outline-secondary">重置</a>
+            </div>
+        </form>
+    </div>
 </div>
 
 <div class="card shadow-sm">
-    <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-list-ul me-1"></i> 操作记录</span></div>
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-sm table-hover align-middle mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th style="width:150px;">时间</th>
-                        <th>用户</th>
-                        <th>动作</th>
-                        <th>目标</th>
-                        <th>IP</th>
-                        <th>详情</th>
+                        <th style="width:140px;">时间</th>
+                        <th style="width:110px;">操作人</th>
+                        <th style="width:90px;">模块</th>
+                        <th style="width:130px;">动作</th>
+                        <th>对象</th>
+                        <th style="width:220px;">请求</th>
+                        <th style="width:70px;">结果</th>
+                        <th style="width:120px;">客户端IP</th>
+                        <th style="width:70px;">耗时</th>
+                        <th>错误信息</th>
                     </tr>
                 </thead>
                 <tbody>
                 {{range .Logs}}
                     <tr>
-                        <td>{{tFmt .CreatedAt}}</td>
-                        <td>{{.Username}}</td>
+                        <td class="text-nowrap">{{tFmt .CreatedAt}}</td>
+                        <td>{{if .Username}}{{.Username}}{{else}}<span class="text-muted">-</span>{{end}}</td>
+                        <td><span class="badge bg-secondary-subtle text-secondary-emphasis">{{.Module}}</span></td>
                         <td><code>{{.Action}}</code></td>
-                        <td>{{.Target}}</td>
-                        <td>{{.IP}}</td>
-                        <td>{{if .Detail}}<code class="small text-break">{{bsstr .Detail}}</code>{{else}}<span class="text-muted">-</span>{{end}}</td>
+                        <td>
+                            {{if .TargetName}}{{.TargetName}}{{end}}
+                            {{if .TargetID}}<span class="text-muted small">{{.TargetID}}</span>{{end}}
+                            {{if and (not .TargetName) (not .TargetID)}}<span class="text-muted">-</span>{{end}}
+                        </td>
+                        <td class="small text-break"><span class="badge bg-light text-dark border">{{.Method}}</span> {{.Path}}</td>
+                        <td>{{if eq .Result "success"}}<span class="badge bg-success">成功</span>{{else}}<span class="badge bg-danger">失败</span>{{end}}</td>
+                        <td class="small text-nowrap">{{.ClientIP}}</td>
+                        <td class="small text-nowrap">{{.ElapsedMS}}ms</td>
+                        <td class="small text-danger text-break">{{if .ErrorMsg}}{{.ErrorMsg}}{{else}}<span class="text-muted">-</span>{{end}}</td>
                     </tr>
                 {{else}}
-                    <tr><td colspan="6" class="text-center text-muted py-3">暂无日志</td></tr>
+                    <tr><td colspan="10" class="text-center text-muted py-3">暂无日志</td></tr>
                 {{end}}
                 </tbody>
             </table>
         </div>
     </div>
     <div class="card-footer bg-white py-2 d-flex justify-content-between align-items-center">
-        <span class="small text-muted">第 {{.Page}} / {{.TotalPages}} 页</span>
+        <span class="small text-muted">共 {{.Total}} 条，第 {{.Page}} / {{.TotalPages}} 页</span>
         <nav>
             <ul class="pagination pagination-sm mb-0">
-                {{if .PrevPage}}<li class="page-item"><a class="page-link" href="/audit?page={{.PrevPage}}">上一页</a></li>{{else}}<li class="page-item disabled"><span class="page-link">上一页</span></li>{{end}}
-                {{if .NextPage}}<li class="page-item"><a class="page-link" href="/audit?page={{.NextPage}}">下一页</a></li>{{else}}<li class="page-item disabled"><span class="page-link">下一页</span></li>{{end}}
+                {{range .Pages}}
+                {{if .Disabled}}
+                <li class="page-item disabled"><span class="page-link">{{.Label}}</span></li>
+                {{else}}
+                <li class="page-item {{if .Active}}active{{end}}"><a class="page-link" href="{{.URL}}">{{.Label}}</a></li>
+                {{end}}
+                {{end}}
             </ul>
         </nav>
     </div>

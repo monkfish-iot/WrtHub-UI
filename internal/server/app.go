@@ -12,6 +12,7 @@ import (
 
 	"wrthub-ui/internal/auth"
 	"wrthub-ui/internal/config"
+	"wrthub-ui/internal/firmware"
 	"wrthub-ui/internal/frpsclient"
 	"wrthub-ui/internal/lucirpc"
 	"wrthub-ui/internal/render"
@@ -34,6 +35,7 @@ type App struct {
 	CredProv *service.CredentialProvider
 	Render   *render.Renderer
 	Wireless *service.Wireless
+	Firmware *firmware.Store
 }
 
 // New 装配所有依赖：打开 DB、初始化管理员、构造 frps_helper / 凭证 / LuCI RPC client、选择认证 provider。
@@ -71,6 +73,7 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		Port:           cfg.DeviceRpc.Port,
 		UbusPath:       cfg.DeviceRpc.UbusPath,
 		Timeout:        cfg.DeviceRpc.Timeout,
+		UploadTimeout:  cfg.DeviceRpc.UploadTimeout,
 		MaxConcurrency: cfg.DeviceRpc.MaxConcurrency,
 	}, rpcClient, log)
 
@@ -97,5 +100,6 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		CredProv: credProv,
 		Render:   renderer,
 		Wireless: service.NewWireless(ubusClient, log),
+		Firmware: firmware.NewStore(cfg.Firmware.Root, cfg.Firmware.MaxSizeMB),
 	}, nil
 }

@@ -19,6 +19,7 @@ device_rpc:
   rpc_path_prefix: "/cgi-bin/luci/rpc"
   token_cache_ttl: "5m"
   timeout: "10s"
+  upload_timeout: "30m"               # cgi-io 固件上传专用超时（大文件慢操作，须远大于 timeout）
   max_concurrency: 4                  # 单设备并发上限
 
 auth:
@@ -34,3 +35,7 @@ storage:
 assets:
   external_dir: "./assets"           # 优先；缺失回退 embed
   templates_dir: "./templates"
+
+firmware:
+  root: "./firmware"                 # 固件库根目录（按设备型号分子目录）
+  max_size_mb: 512                   # 单固件文件大小上限（MB）

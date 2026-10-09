@@ -8,10 +8,11 @@
 //
 // 用法：
 //
-//	go run ./tools/pack -out dist/wrthub-ui-linux-amd64.tar.gz -base dist dist/wrthub-ui dist/config.yaml dist/data
+//	go run ./tools/pack -out dist/wrthub-ui-linux-amd64.tar.gz -base dist dist/wrthub-ui dist/config.yaml dist/templates dist/data
 //
-// -base 指定归档名相对的目录，使归档内路径为 wrthub-ui / config.yaml / data/...
+// -base 指定归档名相对的目录，使归档内路径为 wrthub-ui / config.yaml / templates/...
 // 而非 dist/...。build.ps1 在交叉编译后调用本工具生成部署包。
+// 注意：templates/ 必须随包分发——模板从文件系统读取（非 embed），缺失会导致页面空白/旧版。
 package main
 
 import (

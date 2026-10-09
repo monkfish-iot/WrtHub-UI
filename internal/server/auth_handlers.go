@@ -7,7 +7,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"wrthub-ui/internal/auth"
-	"wrthub-ui/internal/store"
 )
 
 // 登录页内联 HTML（最小可用，待 §8 模板与 Bootstrap 本地化后迁移到 templates/login.html）。
@@ -52,7 +51,7 @@ func loginPage(showErr bool) string {
 }
 
 // registerAuthRoutes 注册公开的登录/登出路由（不受 RequireAuth 保护）。
-// 登录成功/失败、登出均落审计日志（开发技术文档 §5.2）。
+// 登录成功/失败、登出均由全局操作日志中间件统一记录（无需 handler 感知）。
 func registerAuthRoutes(r *gin.Engine, app *App) {
 	r.GET("/login", func(c *gin.Context) {
 		// 已登录直接跳首页，避免重复登录。
@@ -68,41 +67,15 @@ func registerAuthRoutes(r *gin.Engine, app *App) {
 		password := c.PostForm("password")
 		user, err := app.Auth.Authenticate(c.Request.Context(), username, password)
 		if err != nil {
-			// 记录登录失败审计（不区分原因，便于事后排查暴力破解）
-			_ = store.RecordAudit(app.DB, store.AuditEntry{
-				Username:  username,
-				Action:    "user.login_failed",
-				Target:    username,
-				IP:        c.ClientIP(),
-				UserAgent: c.Request.UserAgent(),
-			})
 			// 统一返回 err=1，不区分用户不存在/密码错误/禁用，防枚举。
 			c.Redirect(http.StatusFound, "/login?err=1")
 			return
 		}
 		auth.Login(c, user)
-		_ = store.RecordAudit(app.DB, store.AuditEntry{
-			UserID:    user.ID,
-			Username:  user.Username,
-			Action:    "user.login",
-			Target:    user.Username,
-			IP:        c.ClientIP(),
-			UserAgent: c.Request.UserAgent(),
-		})
 		c.Redirect(http.StatusFound, "/")
 	})
 
 	r.POST("/logout", func(c *gin.Context) {
-		if uid, ok := auth.CurrentUserID(c); ok {
-			uname, _ := auth.CurrentUsername(c)
-			_ = store.RecordAudit(app.DB, store.AuditEntry{
-				UserID:    uid,
-				Username:  uname,
-				Action:    "user.logout",
-				IP:        c.ClientIP(),
-				UserAgent: c.Request.UserAgent(),
-			})
-		}
 		auth.Logout(c)
 		c.Redirect(http.StatusFound, "/login")
 	})

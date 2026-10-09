@@ -73,18 +73,29 @@ type UserTenant struct {
 
 func (UserTenant) TableName() string { return "user_tenants" }
 
-// AuditLog 审计日志。记录登录、设备控制、配置变更等关键动作。
-// Detail 为任意 JSON（json.RawMessage 便于结构化查询但不强约束）。
+// AuditLog 操作日志（append-only：仅由统一中间件写入，无修改/删除入口）。
+// 拦截所有写操作（POST/PUT/DELETE/PATCH）后落库：含操作人、模块/动作/对象、
+// 方法/路径/查询串、脱敏后的请求体快照、结果/HTTP 状态/错误信息、客户端 IP 与耗时。
+// 表名沿用 audit_logs（与旧审计日志共用，字段已扩展）。
 type AuditLog struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	UserID    uint      `gorm:"index" json:"user_id"`
-	Username  string    `gorm:"size:64" json:"username"` // 冗余便于用户删除后仍可追溯
-	Action    string    `gorm:"size:64;index" json:"action"`
-	Target    string    `gorm:"size:128" json:"target"`
-	Detail    []byte    `gorm:"type:json" json:"detail"`
-	IP        string    `gorm:"size:64" json:"ip"`
-	UserAgent string    `gorm:"size:255" json:"user_agent"`
-	CreatedAt time.Time `gorm:"index" json:"created_at"`
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	UserID      uint      `gorm:"index" json:"user_id"`
+	Username    string    `gorm:"size:64;index" json:"username"` // 冗余便于用户删除后仍可追溯
+	Module      string    `gorm:"size:32;index" json:"module"`   // 如 devices / auth
+	Action      string    `gorm:"size:64;index" json:"action"`   // 如 reboot / ssid_save / login
+	TargetType  string    `gorm:"size:32" json:"target_type"`    // 对象类型，如 device / user
+	TargetID    string    `gorm:"size:128;index" json:"target_id"`
+	TargetName  string    `gorm:"size:128" json:"target_name"`
+	Method      string    `gorm:"size:16" json:"method"`
+	Path        string    `gorm:"size:255" json:"path"`
+	Query       string    `gorm:"size:255" json:"query"`
+	RequestBody []byte    `gorm:"type:json" json:"request_body"` // 脱敏后的快照；超限/非 JSON 存说明标记
+	Result      string    `gorm:"size:16;index" json:"result"`   // success / fail
+	HTTPStatus  int       `json:"http_status"`
+	ErrorMsg    string    `gorm:"size:512" json:"error_msg"`
+	ClientIP    string    `gorm:"size:64" json:"client_ip"`
+	ElapsedMS   int       `json:"elapsed_ms"`
+	CreatedAt   time.Time `gorm:"index" json:"created_at"`
 }
 
 func (AuditLog) TableName() string { return "audit_logs" }

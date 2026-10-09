@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -39,7 +38,6 @@ type deviceDetailPage struct {
 	LanIP     string // UBUS luci-rpc getNetworkDevices 现拉：网桥（br-lan）首个 IPv4
 	NetDevs   []netDevRow
 	NetIfaces []netIfaceRow
-	Snapshot  string // additional_data pretty json
 	RPCError  string // 设备调用失败提示（不影响页面渲染）
 }
 
@@ -114,29 +112,12 @@ func (a *App) handleDeviceDetail(c *gin.Context) {
 		LanIP:     lanIP,
 		NetDevs:   netDevs,
 		NetIfaces: netIfaces,
-		Snapshot:  prettyJSON(dev.AdditionalData),
 		RPCError:  rpcErr,
 	}
 	c.Status(http.StatusOK)
 	if rerr := a.Render.Render(c.Writer, "pages/devices/detail", pg); rerr != nil {
 		a.Log.Error("render device detail failed", "err", rerr)
 	}
-}
-
-// prettyJSON 格式化 json.RawMessage 为缩进字符串；空/null 返回 "-"。
-func prettyJSON(raw json.RawMessage) string {
-	if len(raw) == 0 || string(raw) == "null" {
-		return "-"
-	}
-	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return string(raw)
-	}
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return string(raw)
-	}
-	return string(b)
 }
 
 // pickStr 从 map 中按 keys 顺序取第一个非空字符串值。

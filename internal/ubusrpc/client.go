@@ -34,7 +34,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,16 +52,18 @@ type Options struct {
 	Port           int
 	UbusPath       string
 	Timeout        time.Duration
+	UploadTimeout  time.Duration // cgi-io 固件上传专用超时；大文件经 frp 隧道耗时远超普通调用，0 时默认 30m
 	MaxConcurrency int
 }
 
 // Client 是 UBUS JSON-RPC 客户端，作为 lucirpc 失败时的兜底访问方法。
 // token 来源为 lucirpc.Client（/auth 的 luci_token），不独立缓存。
 type Client struct {
-	http *http.Client
-	opts Options
-	rpc  *lucirpc.Client // token 来源（/auth luci_token，实测可直接用于 /ubus）
-	log  *slog.Logger
+	http       *http.Client
+	httpUpload *http.Client // cgi-io 固件上传专用（长超时），与 http 分开避免大文件被 10s 超时中断
+	opts       Options
+	rpc        *lucirpc.Client // token 来源（/auth luci_token，实测可直接用于 /ubus）
+	log        *slog.Logger
 
 	semMu sync.Mutex
 	sems  map[string]chan struct{}
@@ -73,11 +77,12 @@ func New(opts Options, rpc *lucirpc.Client, log *slog.Logger) *Client {
 		log = slog.Default()
 	}
 	return &Client{
-		http: &http.Client{Timeout: opts.Timeout},
-		opts: opts,
-		rpc:  rpc,
-		log:  log,
-		sems: make(map[string]chan struct{}),
+		http:       &http.Client{Timeout: opts.Timeout},
+		httpUpload: &http.Client{Timeout: opts.UploadTimeout},
+		opts:       opts,
+		rpc:        rpc,
+		log:        log,
+		sems:       make(map[string]chan struct{}),
 	}
 }
 
@@ -96,6 +101,9 @@ func applyDefaults(o *Options) {
 	}
 	if o.Timeout == 0 {
 		o.Timeout = 10 * time.Second
+	}
+	if o.UploadTimeout == 0 {
+		o.UploadTimeout = 30 * time.Minute
 	}
 	if o.MaxConcurrency == 0 {
 		o.MaxConcurrency = 4
@@ -145,10 +153,19 @@ func (c *Client) callUbus(ctx context.Context, sessionID, token string, reqID in
 		return nil, true, false, fmt.Errorf("ubus http %d", resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
+		// 错误信息只回显简短原因（完整响应体见日志），避免把 frps 的 404 HTML 页面
+		// 整段拼进页面提示：设备重启/离线时隧道不可达，frps 会返回 “powered by frp” 的 404 页。
+		hint := "设备未响应"
+		switch {
+		case bytes.Contains(dataBytes, []byte("powered by frp")):
+			hint = "设备隧道不可达（设备可能正在重启或离线）"
+		case bytes.Contains(dataBytes, []byte("<html")):
+			hint = "设备返回了非预期页面（可能未运行 Web/RPC 服务）"
+		}
 		c.log.Warn("ubus: non-200",
 			"url", u, "session_id", sessionID, "obj", obj, "method", method,
 			"status", resp.StatusCode, "body_head", head(dataBytes, 256))
-		return nil, false, false, fmt.Errorf("ubus http %d: %s", resp.StatusCode, string(dataBytes))
+		return nil, false, false, fmt.Errorf("ubus http %d（%s）", resp.StatusCode, hint)
 	}
 	var rr jsonrpcResponse
 	if err := json.Unmarshal(dataBytes, &rr); err != nil {
@@ -206,6 +223,7 @@ func (c *Client) Call(ctx context.Context, sessionID, obj, method string, params
 	}
 	// emptyRetried：空数据已重取过一次 token，避免"确实无数据"时无限重登
 	emptyRetried := false
+	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		tok, err := c.rpc.Token(ctx, sessionID)
 		if err != nil {
@@ -229,6 +247,7 @@ func (c *Client) Call(ctx context.Context, sessionID, obj, method string, params
 			c.rpc.Invalidate(sessionID)
 			continue
 		}
+		lastErr = err
 		if !retry {
 			return nil, err
 		}
@@ -236,7 +255,8 @@ func (c *Client) Call(ctx context.Context, sessionID, obj, method string, params
 			"session_id", sessionID, "obj", obj, "method", method, "attempt", attempt+1)
 		c.rpc.Invalidate(sessionID)
 	}
-	return nil, fmt.Errorf("ubus failed after retry: %s.%s", obj, method)
+	// 重试仍未成功：回传真实错误（可能是 rpcd ACL 拒绝 code 6，重登无法解决），避免通用文案掩盖根因
+	return nil, fmt.Errorf("ubus call failed after retry: %s.%s: %w", obj, method, lastErr)
 }
 
 // CallInto 调用 ubus 并把 result[1] 解析到 out 指针。
@@ -263,6 +283,7 @@ func (c *Client) CallWrite(ctx context.Context, sessionID, obj, method string, p
 	if c.rpc == nil {
 		return nil, fmt.Errorf("ubus: no token source (lucirpc client is nil)")
 	}
+	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		tok, err := c.rpc.Token(ctx, sessionID)
 		if err != nil {
@@ -276,11 +297,13 @@ func (c *Client) CallWrite(ctx context.Context, sessionID, obj, method string, p
 		if !retry {
 			return nil, err
 		}
+		lastErr = err
 		c.log.Info("ubus: write retrying after token invalidate",
 			"session_id", sessionID, "obj", obj, "method", method, "attempt", attempt+1)
 		c.rpc.Invalidate(sessionID)
 	}
-	return nil, fmt.Errorf("ubus write failed after retry: %s.%s", obj, method)
+	// 重试仍未成功：回传真实错误（code 6 多为 rpcd ACL 拒绝，重登无效），而非通用文案
+	return nil, fmt.Errorf("ubus write failed after retry: %s.%s: %w", obj, method, lastErr)
 }
 
 // CallWriteInto 调用 ubus 写方法并把 result[1] 解析到 out 指针（通常 out 传空 map 接收 {}）。
@@ -293,6 +316,127 @@ func (c *Client) CallWriteInto(ctx context.Context, sessionID, obj, method strin
 		return nil
 	}
 	return json.Unmarshal(raw, out)
+}
+
+// CGIUploadResult cgi-io 上传响应。
+type CGIUploadResult struct {
+	Size     int64  `json:"size"`
+	Checksum string `json:"checksum"`
+	SHA256   string `json:"sha256sum"`
+	Message  string `json:"message"`
+	Failure  []any  `json:"failure"`
+}
+
+// CGIUpload 通过 cgi-io 上传文件到设备。
+// remotePath 为设备侧目标路径（如 /tmp/firmware.bin），r 为可读文件流。
+// token 复用 lucirpc 的 luci_token（实测可直接作为 cgi-io 的 sessionid）。
+func (c *Client) CGIUpload(ctx context.Context, sessionID, remotePath string, r io.ReadSeeker) (*CGIUploadResult, error) {
+	tok, err := c.rpc.Token(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	res, err := c.cgiUploadOnce(ctx, sessionID, tok, remotePath, r)
+	if err != nil {
+		// token 可能失效，重取一次
+		c.rpc.Invalidate(sessionID)
+		if _, serr := r.Seek(0, io.SeekStart); serr != nil {
+			return nil, fmt.Errorf("文件回卷失败: %w", serr)
+		}
+		tok2, terr := c.rpc.Token(ctx, sessionID)
+		if terr != nil {
+			return nil, terr
+		}
+		res, err = c.cgiUploadOnce(ctx, sessionID, tok2, remotePath, r)
+	}
+	return res, err
+}
+
+func (c *Client) cgiUploadOnce(ctx context.Context, sessionID, token, remotePath string, r io.ReadSeeker) (*CGIUploadResult, error) {
+	body := &bytes.Buffer{}
+	mw := multipart.NewWriter(body)
+	// 字段顺序：sessionid/filename/filemode 必须在 filedata 之前
+	for _, kv := range [][2]string{
+		{"sessionid", token},
+		{"filename", remotePath},
+		{"filemode", "0644"},
+	} {
+		if err := mw.WriteField(kv[0], kv[1]); err != nil {
+			return nil, fmt.Errorf("编码上传表单失败: %w", err)
+		}
+	}
+	part, err := mw.CreateFormFile("filedata", "upload.bin")
+	if err != nil {
+		return nil, fmt.Errorf("创建文件表单字段失败: %w", err)
+	}
+	if _, err := io.Copy(part, r); err != nil {
+		return nil, fmt.Errorf("读取文件失败: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return nil, fmt.Errorf("关闭表单失败: %w", err)
+	}
+
+	u := c.host(sessionID) + "/cgi-bin/cgi-upload"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, body)
+	if err != nil {
+		return nil, fmt.Errorf("构造上传请求失败: %w", err)
+	}
+	req.ContentLength = int64(body.Len())
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	c.log.Info("cgi-upload: start", "session_id", sessionID, "url", u, "size", body.Len())
+	// 使用上传专用 client（长超时）：固件多为数 MB~数百 MB，经 frp 隧道传输远超普通调用，
+	// 复用 10s 的 c.http 必然触发 context deadline exceeded（Client.Timeout）。
+	resp, err := c.httpUpload.Do(req)
+	if err != nil {
+		c.log.Warn("cgi-upload: request failed", "session_id", sessionID, "url", u, "size", body.Len(), "err", err)
+		return nil, fmt.Errorf("上传请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusRequestEntityTooLarge {
+			// 设备端 Web 服务（nginx client_max_body_size）对请求体有体积上限，超限直接 413
+			return nil, fmt.Errorf("固件超过设备侧可接收体积上限（设备 Web 服务限制），当前固件 %d 字节，需设备固件放开限制后才能下发", fileSize(r))
+		}
+		hint := ""
+		switch {
+		case bytes.Contains(raw, []byte("powered by frp")):
+			hint = "（设备隧道不可达，可能正在重启或离线）"
+		case bytes.Contains(raw, []byte("<html")):
+			hint = "（设备返回了非预期页面，可能未运行 Web 服务）"
+		}
+		return nil, fmt.Errorf("上传被拒绝 HTTP %d%s: %s", resp.StatusCode, hint, head(raw, 256))
+	}
+	var out CGIUploadResult
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("解析上传响应失败: %w (body: %s)", err, head(raw, 256))
+	}
+	if len(out.Failure) > 0 || (out.Size == 0 && out.Message != "") {
+		msg := strings.TrimSpace(out.Message)
+		if msg == "" {
+			msg = head(raw, 256)
+		}
+		return nil, fmt.Errorf("设备端上传失败: %s", msg)
+	}
+	if out.Size == 0 {
+		return nil, fmt.Errorf("设备端上传响应异常（未返回写入大小）: %s", head(raw, 256))
+	}
+	c.log.Info("cgi-upload: ok", "session_id", sessionID, "size", out.Size, "checksum_len", len(out.Checksum))
+	return &out, nil
+}
+
+// fileSize 读取 reader 总大小（要求可 Seek；读取后回卷原位置）。
+func fileSize(r io.ReadSeeker) int64 {
+	cur, err := r.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return 0
+	}
+	end, err := r.Seek(0, io.SeekEnd)
+	if err != nil {
+		return 0
+	}
+	_, _ = r.Seek(cur, io.SeekStart)
+	return end
 }
 
 // acquire 获取单设备并发槽，返回释放函数。

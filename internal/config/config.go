@@ -27,6 +27,7 @@ type Config struct {
 	Auth       AuthConfig       `yaml:"auth"`
 	Storage    StorageConfig    `yaml:"storage"`
 	Assets     AssetsConfig     `yaml:"assets"`
+	Firmware   FirmwareConfig   `yaml:"firmware"`
 }
 
 type AppConfig struct {
@@ -54,6 +55,7 @@ type DeviceRpcConfig struct {
 	UbusPath       string        `yaml:"ubus_path"` // UBUS JSON-RPC 端点路径，默认 /ubus；lucirpc 失败时兜底
 	TokenCacheTTL  time.Duration `yaml:"token_cache_ttl"`
 	Timeout        time.Duration `yaml:"timeout"`
+	UploadTimeout  time.Duration `yaml:"upload_timeout"` // cgi-io 固件上传专用超时（大文件慢操作，远大于 Timeout）
 	MaxConcurrency int           `yaml:"max_concurrency"`
 }
 
@@ -72,6 +74,11 @@ type StorageConfig struct {
 type AssetsConfig struct {
 	ExternalDir  string `yaml:"external_dir"`
 	TemplatesDir string `yaml:"templates_dir"`
+}
+
+type FirmwareConfig struct {
+	Root      string `yaml:"root"`        // 固件库根目录（按型号分子目录）
+	MaxSizeMB int64  `yaml:"max_size_mb"` // 单固件文件大小上限（MB）
 }
 
 // ResolvePath 决定实际使用的配置文件路径，优先级由高到低：
@@ -165,6 +172,9 @@ func (c *Config) applyDefaults() {
 	if c.DeviceRpc.Timeout == 0 {
 		c.DeviceRpc.Timeout = 10 * time.Second
 	}
+	if c.DeviceRpc.UploadTimeout == 0 {
+		c.DeviceRpc.UploadTimeout = 30 * time.Minute
+	}
 	if c.DeviceRpc.MaxConcurrency == 0 {
 		c.DeviceRpc.MaxConcurrency = 4
 	}
@@ -188,6 +198,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Assets.TemplatesDir == "" {
 		c.Assets.TemplatesDir = "./templates"
+	}
+	if c.Firmware.Root == "" {
+		c.Firmware.Root = "./firmware"
+	}
+	if c.Firmware.MaxSizeMB <= 0 {
+		c.Firmware.MaxSizeMB = 512
 	}
 }
 
