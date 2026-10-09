@@ -361,6 +361,16 @@ func fmtUptime(sec int64) string {
 	}
 }
 
+// Gateway 从 Routes 字符串中提取默认网关（0.0.0.0/0 → x.x.x.x）。
+func (r netIfaceRow) Gateway() string {
+	for _, rt := range strings.Split(r.Routes, ", ") {
+		if strings.HasPrefix(rt, "0.0.0.0/0 → ") {
+			return strings.TrimPrefix(rt, "0.0.0.0/0 → ")
+		}
+	}
+	return "-"
+}
+
 // fmtBytes 字节数人性化显示（B/KB/MB/GB/TB，保留 1 位小数）。
 func fmtBytes(n uint64) string {
 	const unit = 1024

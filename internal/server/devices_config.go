@@ -8,9 +8,11 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -37,17 +39,20 @@ type uciSection struct {
 
 // ssidView 是无线 TAB 中单个 SSID（wifi-iface）的视图。
 type ssidView struct {
-	Section  string // section 名（如 default_radio0）
-	SSID     string
-	Mode     string // ap（本期固定）
-	Enc      string // 原始 uci encryption 值（编辑表单回显；"" 等价 none）
-	EncText  string // 加密显示名（开放/WPA2-PSK/...，未知值原样显示）
-	Key      string // 当前密码（编辑表单回显，type=password 遮蔽显示）
-	Network  string
-	Hidden   bool
-	Isolate  bool
-	Disabled bool
-	Ifname   string // 实时 ifname（getWirelessDevices interfaces[] 按 section 匹配）
+	Section   string // section 名（如 default_radio0）
+	SSID      string
+	Mode      string // ap（本期固定）
+	Enc       string // 原始 uci encryption 值（编辑表单回显；"" 等价 none）
+	EncText   string // 加密显示名（开放/WPA2-PSK/...，未知值原样显示）
+	Key       string // 当前密码（编辑表单回显，type=password 遮蔽显示）
+	Network   string
+	Hidden    bool
+	Isolate   bool
+	Disabled  bool
+	Ifname    string // 实时 ifname（getWirelessDevices interfaces[] 按 section 匹配）
+	Macfilter string // MAC 过滤模式：""|allow|deny
+	Maclist   string // MAC 列表（空格分隔）
+	Maxsta    string // 最大接入终端数（""=不限）
 }
 
 // EncOptionsHTML 渲染加密模式下拉的 <option> 列表（§4.3，本期支持）。
@@ -97,6 +102,30 @@ func isSaeFamily(e string) bool { return e == "sae" || e == "sae-mixed" }
 
 // encRequiresKey 该加密模式是否必须设置密码（§4.3：psk 类 8-63 字符）。
 func encRequiresKey(e string) bool { return e != "none" && e != "" }
+
+// macfilterChoices MAC 过滤模式下拉选项。
+var macfilterChoices = []struct{ Val, Text string }{
+	{"", "不过滤"},
+	{"allow", "仅允许列表内"},
+	{"deny", "拒绝列表内"},
+}
+
+// MacfilterOptionsHTML 渲染 MAC 过滤模式下拉的 <option> 列表。
+func (s ssidView) MacfilterOptionsHTML() template.HTML {
+	var b strings.Builder
+	for _, c := range macfilterChoices {
+		b.WriteString(`<option value="`)
+		b.WriteString(html.EscapeString(c.Val))
+		b.WriteString(`"`)
+		if c.Val == s.Macfilter {
+			b.WriteString(` selected`)
+		}
+		b.WriteString(`>`)
+		b.WriteString(html.EscapeString(c.Text))
+		b.WriteString(`</option>`)
+	}
+	return template.HTML(b.String())
+}
 
 // radioView 是无线 TAB 中单个无线网卡（wifi-device）的视图。
 type radioView struct {
@@ -192,7 +221,7 @@ type wirelessView struct {
 // EncOptionsHTML 新增 SSID 表单的加密下拉（零值 ssidView → Enc 为空，默认选中 none）。
 func (w *wirelessView) EncOptionsHTML() template.HTML { return ssidView{}.EncOptionsHTML() }
 
-// deviceConfigPage 是设备配置页视图（TAB：LAN / WAN(无则隐藏,只读) / 无线；
+// deviceConfigPage 是设备配置页视图（TAB：概览 / LAN / WAN(无则隐藏,只读) / 无线 / 客户端 / 日志；
 // 防火墙 TAB 暂时隐藏——用户确认，后续有需求再开发）。
 type deviceConfigPage struct {
 	pageBase
@@ -200,9 +229,152 @@ type deviceConfigPage struct {
 	LAN      []uciSection // LAN 组：lan/globals/br-lan device sections
 	WAN      []uciSection // WAN 组；nil = 无 WAN（桥模式）→ WAN TAB 隐藏
 	Wireless *wirelessView
-	Error    string // 拉取失败提示（不影响页面渲染）
-	FlashOK  string // 写操作成功提示（来自 ?ok= 查询参数）
-	FlashErr string // 写操作失败提示（来自 ?err= 查询参数）
+	// 新增 TAB 数据（参考 tentant-mng DeviceConfig.vue）
+	Overview  *overviewView // 概览：system.board + system.info
+	NetIfaces []netIfaceRow // 网络接口状态（network.interface dump）
+	Hosts     []hostRow     // 主机表（luci-rpc getHostHints）
+	Clients   []clientRow   // 接入客户端（iwinfo assoclist 聚合）
+	Logs      []logLine     // 系统日志（log read）
+	Error     string        // 拉取失败提示（不影响页面渲染）
+	FlashOK   string        // 写操作成功提示（来自 ?ok= 查询参数）
+	FlashErr  string        // 写操作失败提示（来自 ?err= 查询参数）
+	ActiveTab string        // 当前激活 TAB（用于写操作后回显定位）
+}
+
+// overviewView 概览 TAB 视图：system.board（硬件/固件信息）+ system.info（运行状态）。
+type overviewView struct {
+	Board map[string]any
+	Info  map[string]any
+}
+
+// BoardStr 从 board 中取字符串字段（多键回退）。
+func (o *overviewView) BoardStr(keys ...string) string {
+	return mapStr(o.Board, keys...)
+}
+
+// InfoStr 从 info 中取字符串字段（多键回退）。
+func (o *overviewView) InfoStr(keys ...string) string {
+	return mapStr(o.Info, keys...)
+}
+
+// InfoFloat 从 info 中取浮点数字段。
+func (o *overviewView) InfoFloat(key string) float64 {
+	if v, ok := o.Info[key]; ok {
+		switch t := v.(type) {
+		case float64:
+			return t
+		case float32:
+			return float64(t)
+		case int:
+			return float64(t)
+		case int64:
+			return float64(t)
+		}
+	}
+	return 0
+}
+
+// ReleaseText 格式化 board.release（map）为 "distro version (revision)"。
+func (o *overviewView) ReleaseText() string {
+	r, ok := o.Board["release"].(map[string]any)
+	if !ok {
+		return "-"
+	}
+	distro, _ := r["distribution"].(string)
+	version, _ := r["version"].(string)
+	revision, _ := r["revision"].(string)
+	parts := []string{}
+	if distro != "" {
+		parts = append(parts, distro)
+	}
+	if version != "" {
+		parts = append(parts, version)
+	}
+	if revision != "" {
+		parts = append(parts, "("+revision+")")
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, " ")
+}
+
+// LoadsText 格式化 info.load（[1,5,15] 分钟负载数组）。
+func (o *overviewView) LoadsText() string {
+	v, ok := o.Info["load"].([]any)
+	if !ok || len(v) < 3 {
+		return "-"
+	}
+	parts := make([]string, 3)
+	for i := 0; i < 3; i++ {
+		if f, ok := v[i].(float64); ok {
+			parts[i] = fmt.Sprintf("%.2f", f/65536.0) // OpenWrt load 以 2^16 为单位
+		} else {
+			parts[i] = "?"
+		}
+	}
+	return strings.Join(parts, " / ")
+}
+
+// MemText 格式化 info.memory（{total, free, shared, buffered}）为 "已用 X / 总 Y MB"。
+func (o *overviewView) MemText() string {
+	m, ok := o.Info["memory"].(map[string]any)
+	if !ok {
+		return "-"
+	}
+	total, _ := m["total"].(float64)
+	free, _ := m["free"].(float64)
+	if total <= 0 {
+		return "-"
+	}
+	usedMB := (total - free) / 1024 / 1024
+	totalMB := total / 1024 / 1024
+	return fmt.Sprintf("%.1f / %.1f MB", usedMB, totalMB)
+}
+
+// LocalTimeText 格式化 info.localtime（unix 时间戳）。
+func (o *overviewView) LocalTimeText() string {
+	return fmtUnixTime(int64(o.InfoFloat("localtime")))
+}
+
+// UptimeText 格式化 info.uptime（秒）。
+func (o *overviewView) UptimeText() string {
+	return fmtUptime(int64(o.InfoFloat("uptime")))
+}
+
+// mapStr 从 map 中按键列表取第一个非空字符串值。
+func mapStr(m map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if v, ok := m[k]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				return s
+			}
+		}
+	}
+	return "-"
+}
+
+// hostRow 主机表单行（luci-rpc getHostHints 响应）。
+type hostRow struct {
+	MAC  string
+	Name string
+	IPv4 string
+	IPv6 string
+}
+
+// clientRow 接入客户端行（iwinfo assoclist 聚合所有无线接口）。
+type clientRow struct {
+	Ifname string
+	MAC    string
+	Signal any
+	Rate   any
+}
+
+// logLine 系统日志行（log read 响应，按行拆分）。
+type logLine struct {
+	Time     string
+	Facility string
+	Message  string
 }
 
 // handleDeviceConfig 渲染设备配置页。
@@ -220,10 +392,11 @@ func (a *App) handleDeviceConfig(c *gin.Context) {
 
 	u, _ := auth.CurrentUser(c)
 	pg := deviceConfigPage{
-		pageBase: pageBase{ActiveMenu: "devices", CurrentUser: u, Config: a.Cfg},
-		Device:   dev,
-		FlashOK:  c.Query("ok"),
-		FlashErr: c.Query("err"),
+		pageBase:  pageBase{ActiveMenu: "devices", CurrentUser: u, Config: a.Cfg},
+		Device:    dev,
+		FlashOK:   c.Query("ok"),
+		FlashErr:  c.Query("err"),
+		ActiveTab: c.DefaultQuery("tab", "overview"),
 	}
 
 	var errs []string
@@ -232,6 +405,12 @@ func (a *App) handleDeviceConfig(c *gin.Context) {
 		a.Log.Info("device config: skip ubus for non-online device", "device_id", deviceID, "status", dev.Status)
 	} else {
 		ctx := c.Request.Context()
+		// 概览：system.board + system.info
+		if ov, oerr := fetchOverview(ctx, a, dev.SessionID); oerr != nil {
+			errs = append(errs, "概览: "+oerr.Error())
+		} else {
+			pg.Overview = ov
+		}
 		// network 配置 → LAN/WAN 分组（WAN 不存在 = 桥模式）
 		secs, nerr := fetchUciSections(ctx, a, dev.SessionID, "network")
 		if nerr != nil {
@@ -241,6 +420,18 @@ func (a *App) handleDeviceConfig(c *gin.Context) {
 		} else {
 			pg.LAN, pg.WAN = splitLanWan(secs)
 		}
+		// 网络接口状态（network.interface dump）
+		if ifs, ierr := fetchNetIfaces(ctx, a, dev.SessionID); ierr != nil {
+			errs = append(errs, "网络接口: "+ierr.Error())
+		} else {
+			pg.NetIfaces = ifs
+		}
+		// 主机表（luci-rpc getHostHints）
+		if hosts, herr := fetchHostHints(ctx, a, dev.SessionID); herr != nil {
+			errs = append(errs, "主机表: "+herr.Error())
+		} else {
+			pg.Hosts = hosts
+		}
 		// wireless 配置 + getWirelessDevices 实时状态
 		wv, werr := buildWirelessView(ctx, a, dev.SessionID)
 		if werr != nil {
@@ -249,6 +440,18 @@ func (a *App) handleDeviceConfig(c *gin.Context) {
 				"device_id", deviceID, "session_id", dev.SessionID, "err", werr)
 		} else {
 			pg.Wireless = wv
+		}
+		// 接入客户端（iwinfo assoclist 聚合所有无线接口）
+		if clients, cerr := fetchClients(ctx, a, dev.SessionID); cerr != nil {
+			errs = append(errs, "接入客户端: "+cerr.Error())
+		} else {
+			pg.Clients = clients
+		}
+		// 系统日志（log read，默认 200 行）
+		if logs, lerr := fetchLogs(ctx, a, dev.SessionID, 200); lerr != nil {
+			errs = append(errs, "系统日志: "+lerr.Error())
+		} else {
+			pg.Logs = logs
 		}
 	}
 	if len(errs) > 0 {
@@ -320,6 +523,116 @@ func splitLanWan(sections []uciSection) (lan, wan []uciSection) {
 		}
 	}
 	return lan, wan
+}
+
+// fetchOverview 调用 ubus system.board + system.info 获取设备概览信息。
+// board: 主机名、型号、主板、内核、固件版本；info: 运行时长、负载、内存、本地时间。
+func fetchOverview(ctx context.Context, a *App, sessionID string) (*overviewView, error) {
+	var board map[string]any
+	if err := a.Ubus.CallInto(ctx, sessionID, "system", "board", &board, map[string]any{}); err != nil {
+		return nil, fmt.Errorf("system.board: %w", err)
+	}
+	var info map[string]any
+	if err := a.Ubus.CallInto(ctx, sessionID, "system", "info", &info, map[string]any{}); err != nil {
+		return nil, fmt.Errorf("system.info: %w", err)
+	}
+	return &overviewView{Board: board, Info: info}, nil
+}
+
+// fetchHostHints 调用 ubus luci-rpc getHostHints 获取主机表（MAC/主机名/IPv4/IPv6）。
+// 响应为 map[mac]host 对象，host 含 name/ipaddr/ip6addr 等字段。
+func fetchHostHints(ctx context.Context, a *App, sessionID string) ([]hostRow, error) {
+	var hints map[string]struct {
+		Name    string `json:"name"`
+		IPAddr  string `json:"ipaddr"`
+		IP6Addr string `json:"ip6addr"`
+	}
+	if err := a.Ubus.CallInto(ctx, sessionID, "luci-rpc", "getHostHints", &hints, map[string]any{}); err != nil {
+		return nil, err
+	}
+	rows := make([]hostRow, 0, len(hints))
+	for mac, h := range hints {
+		rows = append(rows, hostRow{
+			MAC:  mac,
+			Name: h.Name,
+			IPv4: h.IPAddr,
+			IPv6: h.IP6Addr,
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].MAC < rows[j].MAC })
+	return rows, nil
+}
+
+// fetchClients 聚合设备所有无线接口的 assoclist，返回接入客户端列表。
+// 复用 service.Wireless.Stations（已聚合多接口），转换为模板友好结构。
+func fetchClients(ctx context.Context, a *App, sessionID string) ([]clientRow, error) {
+	stations, err := a.Wireless.Stations(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]clientRow, 0, len(stations))
+	for _, st := range stations {
+		row := clientRow{
+			Ifname: fmt.Sprintf("%v", st["ifname"]),
+			MAC:    fmt.Sprintf("%v", st["mac"]),
+			Signal: st["signal"],
+			Rate:   st["rx_rate"],
+		}
+		if row.MAC == "" || row.MAC == "<nil>" {
+			row.MAC = fmt.Sprintf("%v", st["addr"])
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+// fetchLogs 调用 ubus log read 获取系统日志（lines 行）。
+// 响应为 {"log":[{"time":...,"facility":...,"msg":...}]} 或纯字符串行。
+func fetchLogs(ctx context.Context, a *App, sessionID string, lines int) ([]logLine, error) {
+	if lines <= 0 {
+		lines = 200
+	}
+	if lines > 1000 {
+		lines = 1000
+	}
+	var resp struct {
+		Log []struct {
+			Time     int64  `json:"time"`
+			Facility int    `json:"facility"`
+			Msg      string `json:"msg"`
+		} `json:"log"`
+	}
+	if err := a.Ubus.CallInto(ctx, sessionID, "log", "read", &resp, map[string]any{"lines": lines}); err != nil {
+		return nil, err
+	}
+	out := make([]logLine, 0, len(resp.Log))
+	for _, e := range resp.Log {
+		out = append(out, logLine{
+			Time:     fmtUnixTime(e.Time),
+			Facility: facilityName(e.Facility),
+			Message:  e.Msg,
+		})
+	}
+	return out, nil
+}
+
+// fmtUnixTime 将 unix 时间戳格式化为 "2006-01-02 15:04:05"（设备本地时区）。
+func fmtUnixTime(t int64) string {
+	if t <= 0 {
+		return "-"
+	}
+	return time.Unix(t, 0).Format("2006-01-02 15:04:05")
+}
+
+// facilityName syslog facility 编号转名称（log read 响应的 facility 字段）。
+func facilityName(f int) string {
+	names := []string{"kern", "user", "mail", "daemon", "auth", "syslog",
+		"lpr", "news", "uucp", "cron", "authpriv", "ftp", "", "", "", "",
+		"local0", "local1", "local2", "local3", "local4", "local5", "local6", "local7"}
+	if f >= 0 && f < len(names) && names[f] != "" {
+		return names[f]
+	}
+	return fmt.Sprintf("facility%d", f)
 }
 
 // buildWirelessView 构建无线 TAB 视图：uci.get wireless（radio/SSID 配置）+
@@ -399,16 +712,19 @@ func buildWirelessView(ctx context.Context, a *App, sessionID string) (*wireless
 			continue
 		}
 		sv := ssidView{
-			Section:  s.Name,
-			SSID:     secField(s, "ssid"),
-			Mode:     secField(s, "mode"),
-			Enc:      secField(s, "encryption"),
-			EncText:  encText(secField(s, "encryption")),
-			Key:      secField(s, "key"),
-			Network:  secField(s, "network"),
-			Hidden:   uciTruthy(secField(s, "hidden")),
-			Isolate:  uciTruthy(secField(s, "isolate")),
-			Disabled: uciTruthy(secField(s, "disabled")),
+			Section:   s.Name,
+			SSID:      secField(s, "ssid"),
+			Mode:      secField(s, "mode"),
+			Enc:       secField(s, "encryption"),
+			EncText:   encText(secField(s, "encryption")),
+			Key:       secField(s, "key"),
+			Network:   secField(s, "network"),
+			Hidden:    uciTruthy(secField(s, "hidden")),
+			Isolate:   uciTruthy(secField(s, "isolate")),
+			Disabled:  uciTruthy(secField(s, "disabled")),
+			Macfilter: secField(s, "macfilter"),
+			Maclist:   secField(s, "maclist"),
+			Maxsta:    secField(s, "maxsta"),
 		}
 		devName := secField(s, "device")
 		if li, ok := live[devName].(map[string]any); ok {
@@ -891,6 +1207,9 @@ func (a *App) handleDeviceConfigSSIDEdit(c *gin.Context) {
 	enc := c.PostForm("encryption")
 	key := c.PostForm("key")
 	network := strings.TrimSpace(c.PostForm("network"))
+	macfilter := strings.TrimSpace(c.PostForm("macfilter"))
+	maclist := strings.TrimSpace(c.PostForm("maclist"))
+	maxstaStr := strings.TrimSpace(c.PostForm("maxsta"))
 	flag := func(name string) string {
 		if c.PostForm(name) == "1" {
 			return "1"
@@ -916,6 +1235,31 @@ func (a *App) handleDeviceConfigSSIDEdit(c *gin.Context) {
 	if encRequiresKey(enc) && (len(key) < 8 || len(key) > 63) {
 		errMsg("该加密模式需要 8-63 位密码")
 		return
+	}
+	// MAC 过滤校验：macfilter 仅允许 ""|allow|deny；启用时 maclist 至少一个合法 MAC
+	if macfilter != "" && macfilter != "allow" && macfilter != "deny" {
+		errMsg("MAC 过滤模式不合法：" + macfilter)
+		return
+	}
+	var macList []string
+	if macfilter != "" {
+		var ok bool
+		if macList, ok = parseMacList(maclist); !ok {
+			errMsg("启用 MAC 过滤时至少填写一个合法 MAC 地址")
+			return
+		}
+	}
+	// maxsta 校验：""=不修改，0=不限（删除），1-64
+	var maxsta int
+	var maxstaSet bool
+	if maxstaStr != "" {
+		n, err := strconv.Atoi(maxstaStr)
+		if err != nil || n < 0 || n > 64 {
+			errMsg("最大接入终端数需 0-64（0=不限制）")
+			return
+		}
+		maxsta = n
+		maxstaSet = true
 	}
 	if dev.SessionID == "" || dev.Status != "online" {
 		errMsg("设备离线，无法修改配置")
@@ -993,6 +1337,15 @@ func (a *App) handleDeviceConfigSSIDEdit(c *gin.Context) {
 		if isSaeFamily(enc) {
 			values["ocv"] = "0" // §3.4：LuCI 25.x 对 sae 系自动补写，兼容旧客户端
 		}
+		// MAC 过滤：macfilter 非空时写入 macfilter + maclist
+		if macfilter != "" {
+			values["macfilter"] = macfilter
+			values["maclist"] = macList
+		}
+		// maxsta：>0 时写入
+		if maxstaSet && maxsta > 0 {
+			values["maxsta"] = strconv.Itoa(maxsta)
+		}
 	} else {
 		// 编辑：仅写与当前值不同的选项（幂等）；比较时把未设置（""）的加密视为 none
 		setIf := func(k, newV, oldV string) {
@@ -1032,6 +1385,36 @@ func (a *App) handleDeviceConfigSSIDEdit(c *gin.Context) {
 		setIf("hidden", hidden, boolUci(secField(*cur, "hidden") != "" && uciTruthy(secField(*cur, "hidden"))))
 		setIf("isolate", isolate, boolUci(secField(*cur, "isolate") != "" && uciTruthy(secField(*cur, "isolate"))))
 		setIf("disabled", disabled, boolUci(secField(*cur, "disabled") != "" && uciTruthy(secField(*cur, "disabled"))))
+		// MAC 过滤：macfilter ""=不过滤（清除），allow/deny=启用
+		curMF := secField(*cur, "macfilter")
+		if macfilter == "" {
+			if curMF != "" && curMF != "disable" {
+				delOpts = append(delOpts, "macfilter")
+			}
+			if secField(*cur, "maclist") != "" {
+				delOpts = append(delOpts, "maclist")
+			}
+		} else {
+			if curMF != macfilter {
+				values["macfilter"] = macfilter
+			}
+			curMaclist := secField(*cur, "maclist")
+			wantMaclist := strings.Join(macList, " ")
+			if curMaclist != wantMaclist {
+				values["maclist"] = macList
+			}
+		}
+		// maxsta：未设置=不修改；0=不限（删除）；1-64=写入
+		if maxstaSet {
+			curMaxsta := secField(*cur, "maxsta")
+			if maxsta == 0 {
+				if curMaxsta != "" {
+					delOpts = append(delOpts, "maxsta")
+				}
+			} else if curMaxsta != strconv.Itoa(maxsta) {
+				values["maxsta"] = strconv.Itoa(maxsta)
+			}
+		}
 	}
 
 	if !isAdd && len(values) == 0 && len(delOpts) == 0 {
@@ -1199,4 +1582,129 @@ func (a *App) handleDeviceConfigSSIDDelete(c *gin.Context) {
 	} else {
 		errMsg(msg)
 	}
+}
+
+// macRe MAC 地址格式校验正则（xx:xx:xx:xx:xx:xx）。
+var macRe = regexp.MustCompile(`^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$`)
+
+// parseMacList 解析并校验 MAC 列表（逗号/空格/换行/分号分隔），返回小写 MAC 数组。
+// 任一 MAC 格式非法返回 false。
+func parseMacList(s string) ([]string, bool) {
+	fields := strings.FieldsFunc(s, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\n' || r == '\r' || r == '\t' || r == ';'
+	})
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		mac := strings.TrimSpace(f)
+		if !macRe.MatchString(mac) {
+			return nil, false
+		}
+		out = append(out, strings.ToLower(mac))
+	}
+	return out, len(out) > 0
+}
+
+// handleDeviceReboot 重启设备（POST /devices/:id/config/reboot）。
+// 调用 ubus system reboot；rpcd 先应答后重启，若指令已发出但通道中断（非拨号失败），
+// 按"已下发未确认"处理。危险操作前端二次确认。
+func (a *App) handleDeviceReboot(c *gin.Context) {
+	deviceID := c.Param("id")
+	dev, err := a.Frps.GetDevice(c.Request.Context(), deviceID)
+	if err != nil {
+		c.String(http.StatusNotFound, "设备未找到：%s", deviceID)
+		return
+	}
+	back := "/devices/" + deviceID + "/config?tab=overview"
+	okMsg := func(msg string) { c.Redirect(http.StatusFound, back+"&ok="+url.QueryEscape(msg)) }
+	errMsg := func(msg string) { c.Redirect(http.StatusFound, back+"&err="+url.QueryEscape(msg)) }
+
+	u, _ := auth.CurrentUser(c)
+	audit := func(ok bool, detail map[string]any) {
+		action := "device.reboot_failed"
+		if ok {
+			action = "device.reboot"
+		}
+		_ = store.RecordAudit(a.DB, store.AuditEntry{
+			UserID: u.ID, Username: u.Username, Action: action,
+			Target: deviceID, Detail: detail,
+			IP: c.ClientIP(), UserAgent: c.Request.UserAgent(),
+		})
+	}
+
+	if dev.SessionID == "" || dev.Status != "online" {
+		errMsg("设备离线，无法重启")
+		return
+	}
+	ctx := c.Request.Context()
+	_, rerr := a.Ubus.CallWrite(ctx, dev.SessionID, "system", "reboot", map[string]any{})
+	if rerr != nil {
+		audit(false, map[string]any{"err": rerr.Error()})
+		errMsg("重启失败: " + rerr.Error())
+		return
+	}
+	audit(true, nil)
+	okMsg("重启指令已下发，设备将在数秒后重启（约 1-2 分钟后恢复在线）")
+}
+
+// handleDeviceKickClient 踢无线客户端下线（POST /devices/:id/config/clients/kick）。
+// 调用 ubus hostapd.<ifname> del_client，需 ifname + 合法 MAC。前端二次确认。
+func (a *App) handleDeviceKickClient(c *gin.Context) {
+	deviceID := c.Param("id")
+	dev, err := a.Frps.GetDevice(c.Request.Context(), deviceID)
+	if err != nil {
+		c.String(http.StatusNotFound, "设备未找到：%s", deviceID)
+		return
+	}
+	back := "/devices/" + deviceID + "/config?tab=clients"
+	okMsg := func(msg string) { c.Redirect(http.StatusFound, back+"&ok="+url.QueryEscape(msg)) }
+	errMsg := func(msg string) { c.Redirect(http.StatusFound, back+"&err="+url.QueryEscape(msg)) }
+
+	u, _ := auth.CurrentUser(c)
+	audit := func(ok bool, detail map[string]any) {
+		action := "wireless.kick_failed"
+		if ok {
+			action = "wireless.kick"
+		}
+		_ = store.RecordAudit(a.DB, store.AuditEntry{
+			UserID: u.ID, Username: u.Username, Action: action,
+			Target: deviceID, Detail: detail,
+			IP: c.ClientIP(), UserAgent: c.Request.UserAgent(),
+		})
+	}
+
+	ifname := strings.TrimSpace(c.PostForm("ifname"))
+	mac := strings.ToLower(strings.TrimSpace(c.PostForm("mac")))
+	if ifname == "" {
+		errMsg("缺少 ifname 参数")
+		return
+	}
+	if !macRe.MatchString(mac) {
+		errMsg("MAC 地址格式不合法：" + mac)
+		return
+	}
+	if dev.SessionID == "" || dev.Status != "online" {
+		errMsg("设备离线，无法执行操作")
+		return
+	}
+	ctx := c.Request.Context()
+	// ifname 白名单校验：必须是设备当前无线接口，防任意 ifname 探测
+	ifaces := a.Wireless.Interfaces(ctx, dev.SessionID)
+	if !containsStr(ifaces, ifname) {
+		audit(false, map[string]any{"ifname": ifname, "mac": mac, "err": "ifname not in device wireless ifaces"})
+		errMsg("ifname 不是该设备的无线接口：" + ifname)
+		return
+	}
+	if _, kerr := a.Ubus.CallWrite(ctx, dev.SessionID, "hostapd."+ifname, "del_client", map[string]any{
+		"addr":     mac,
+		"reason":   5,
+		"ban_time": 60000,
+		"deauth":   true,
+		"disassoc": true,
+	}); kerr != nil {
+		audit(false, map[string]any{"ifname": ifname, "mac": mac, "err": kerr.Error()})
+		errMsg("踢下线失败: " + kerr.Error())
+		return
+	}
+	audit(true, map[string]any{"ifname": ifname, "mac": mac})
+	okMsg(fmt.Sprintf("已踢下线客户端 %s（接口 %s），60 秒内禁止重新接入", mac, ifname))
 }
