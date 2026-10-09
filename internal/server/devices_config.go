@@ -221,6 +221,9 @@ type wirelessView struct {
 // EncOptionsHTML 新增 SSID 表单的加密下拉（零值 ssidView → Enc 为空，默认选中 none）。
 func (w *wirelessView) EncOptionsHTML() template.HTML { return ssidView{}.EncOptionsHTML() }
 
+// MacfilterOptionsHTML 新增 SSID 表单的 MAC 过滤下拉（零值 ssidView → Macfilter 为空，默认选中"不过滤"）。
+func (w *wirelessView) MacfilterOptionsHTML() template.HTML { return ssidView{}.MacfilterOptionsHTML() }
+
 // deviceConfigPage 是设备配置页视图（TAB：概览 / LAN / WAN(无则隐藏,只读) / 无线 / 客户端 / 日志；
 // 防火墙 TAB 暂时隐藏——用户确认，后续有需求再开发）。
 type deviceConfigPage struct {

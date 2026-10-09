@@ -4,6 +4,9 @@
     <div class="d-flex gap-1">
         <a href="/devices/{{.Device.DeviceID}}" class="btn btn-outline-secondary btn-sm"><i class="fas fa-arrow-left"></i> 返回详情</a>
         <a href="/devices" class="btn btn-outline-secondary btn-sm"><i class="fas fa-list"></i> 设备列表</a>
+        <form method="post" action="/devices/{{.Device.DeviceID}}/config/reboot" class="d-inline" onsubmit="return rebootDevice(this);">
+            <button type="submit" class="btn btn-outline-danger btn-sm"><i class="fas fa-power-off me-1"></i> 重启</button>
+        </form>
     </div>
 </div>
 
@@ -19,21 +22,132 @@
 
 <ul class="nav nav-tabs mb-2" role="tablist">
     <li class="nav-item" role="presentation">
-        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-lan" type="button" role="tab"><i class="fas fa-home me-1"></i> LAN <span class="badge bg-secondary">{{len .LAN}}</span></button>
+        <button class="nav-link {{if eq .ActiveTab `overview`}}active{{end}}" data-bs-toggle="tab" data-bs-target="#tab-overview" type="button" role="tab"><i class="fas fa-info-circle me-1"></i> 概览</button>
     </li>
-    {{if .WAN}}
     <li class="nav-item" role="presentation">
-        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-wan" type="button" role="tab"><i class="fas fa-globe me-1"></i> WAN <span class="badge bg-secondary">{{len .WAN}}</span></button>
+        <button class="nav-link {{if eq .ActiveTab `network`}}active{{else if not (or (eq .ActiveTab `overview`) (eq .ActiveTab `wireless`) (eq .ActiveTab `clients`) (eq .ActiveTab `logs`))}}active{{end}}" data-bs-toggle="tab" data-bs-target="#tab-network" type="button" role="tab"><i class="fas fa-network-wired me-1"></i> 网络</button>
     </li>
-    {{end}}
     <li class="nav-item" role="presentation">
-        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-wireless" type="button" role="tab"><i class="fas fa-wifi me-1"></i> 无线 <span class="badge bg-secondary">{{if .Wireless}}{{len .Wireless.Radios}}{{end}}</span></button>
+        <button class="nav-link {{if eq .ActiveTab `wireless`}}active{{end}}" data-bs-toggle="tab" data-bs-target="#tab-wireless" type="button" role="tab"><i class="fas fa-wifi me-1"></i> 无线 {{if .Wireless}}<span class="badge bg-secondary">{{len .Wireless.Radios}}</span>{{end}}</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {{if eq .ActiveTab `clients`}}active{{end}}" data-bs-toggle="tab" data-bs-target="#tab-clients" type="button" role="tab"><i class="fas fa-laptop me-1"></i> 客户端 {{if .Clients}}<span class="badge bg-secondary">{{len .Clients}}</span>{{end}}</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {{if eq .ActiveTab `logs`}}active{{end}}" data-bs-toggle="tab" data-bs-target="#tab-logs" type="button" role="tab"><i class="fas fa-file-alt me-1"></i> 日志</button>
     </li>
 </ul>
 
 <div class="tab-content">
-    <div class="tab-pane fade show active" id="tab-lan" role="tabpanel">
+    <!-- 概览 TAB -->
+    <div class="tab-pane fade {{if eq .ActiveTab `overview`}}show active{{end}}" id="tab-overview" role="tabpanel">
+        {{if .Overview}}
+        <div class="card shadow-sm mb-2">
+            <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-microchip me-1"></i> 系统信息（system.board）</span></div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0 small">
+                    <tbody>
+                    <tr><th class="table-light" style="width:160px;">主机名</th><td>{{.Overview.BoardStr "hostname"}}</td></tr>
+                    <tr><th class="table-light">设备型号</th><td>{{.Overview.BoardStr "model"}}</td></tr>
+                    <tr><th class="table-light">主板</th><td>{{.Overview.BoardStr "board_name" "boardname"}}</td></tr>
+                    <tr><th class="table-light">内核版本</th><td>{{.Overview.BoardStr "kernel"}}</td></tr>
+                    <tr><th class="table-light">架构</th><td>{{.Overview.BoardStr "architecture"}}</td></tr>
+                    <tr><th class="table-light">固件</th><td>{{.Overview.ReleaseText}}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
         <div class="card shadow-sm">
+            <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-tachometer-alt me-1"></i> 运行状态（system.info）</span></div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0 small">
+                    <tbody>
+                    <tr><th class="table-light" style="width:160px;">运行时长</th><td>{{.Overview.UptimeText}}</td></tr>
+                    <tr><th class="table-light">负载（1/5/15 分钟）</th><td>{{.Overview.LoadsText}}</td></tr>
+                    <tr><th class="table-light">内存使用（已用/总量）</th><td>{{.Overview.MemText}}</td></tr>
+                    <tr><th class="table-light">本地时间</th><td>{{.Overview.LocalTimeText}}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {{else}}
+        <div class="text-muted small py-3 text-center">无概览数据（设备离线或调用失败）</div>
+        {{end}}
+    </div>
+
+    <!-- 网络 TAB -->
+    <div class="tab-pane fade {{if or (eq .ActiveTab `network`) (not (or (eq .ActiveTab `overview`) (eq .ActiveTab `wireless`) (eq .ActiveTab `clients`) (eq .ActiveTab `logs`)))}}show active{{end}}" id="tab-network" role="tabpanel">
+        <div class="card shadow-sm mb-2">
+            <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-ethernet me-1"></i> 网络接口状态（network.interface dump）</span></div>
+            <div class="card-body p-0">
+                {{if .NetIfaces}}
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0 small">
+                        <thead>
+                            <tr class="table-light">
+                                <th>接口</th>
+                                <th>状态</th>
+                                <th>协议</th>
+                                <th>物理设备</th>
+                                <th>IPv4 地址</th>
+                                <th>网关</th>
+                                <th>在线时长</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {{range .NetIfaces}}
+                            <tr>
+                                <td><code>{{.Name}}</code></td>
+                                <td>{{if .Up}}<span class="badge bg-success">UP</span>{{else}}<span class="badge bg-secondary">DOWN</span>{{end}}</td>
+                                <td>{{.Proto}}</td>
+                                <td>{{.Device}}</td>
+                                <td>{{if .IPv4}}{{.IPv4}}{{else}}—{{end}}</td>
+                                <td>{{.Gateway}}</td>
+                                <td>{{.Uptime}}</td>
+                            </tr>
+                        {{end}}
+                        </tbody>
+                    </table>
+                </div>
+                {{else}}
+                <div class="text-muted small py-3 text-center">无接口数据</div>
+                {{end}}
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-2">
+            <div class="card-header bg-white py-2"><span class="small fw-semibold"><i class="fas fa-desktop me-1"></i> 主机表（getHostHints）</span></div>
+            <div class="card-body p-0">
+                {{if .Hosts}}
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0 small">
+                        <thead>
+                            <tr class="table-light">
+                                <th>MAC 地址</th>
+                                <th>主机名</th>
+                                <th>IPv4 地址</th>
+                                <th>IPv6 地址</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {{range .Hosts}}
+                            <tr>
+                                <td><code>{{.MAC}}</code></td>
+                                <td>{{if .Name}}{{.Name}}{{else}}—{{end}}</td>
+                                <td>{{if .IPv4}}{{.IPv4}}{{else}}—{{end}}</td>
+                                <td>{{if .IPv6}}{{.IPv6}}{{else}}—{{end}}</td>
+                            </tr>
+                        {{end}}
+                        </tbody>
+                    </table>
+                </div>
+                {{else}}
+                <div class="text-muted small py-3 text-center">暂无主机记录</div>
+                {{end}}
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-2">
             <div class="card-header d-flex justify-content-between align-items-center bg-white py-2">
                 <span class="small fw-semibold"><i class="fas fa-home me-1"></i> LAN 配置（uci get config=network）</span>
                 {{if .WAN}}
@@ -46,10 +160,8 @@
                 {{if .LAN}}{{template "ucicards" .LAN}}{{else}}<div class="text-muted small py-3 text-center">无数据（设备离线或调用失败）</div>{{end}}
             </div>
         </div>
-    </div>
 
-    {{if .WAN}}
-    <div class="tab-pane fade" id="tab-wan" role="tabpanel">
+        {{if .WAN}}
         <div class="card shadow-sm">
             <div class="card-header d-flex justify-content-between align-items-center bg-white py-2">
                 <span class="small fw-semibold"><i class="fas fa-globe me-1"></i> WAN 配置（只读）</span>
@@ -59,10 +171,11 @@
                 {{template "ucicards" .WAN}}
             </div>
         </div>
+        {{end}}
     </div>
-    {{end}}
 
-    <div class="tab-pane fade" id="tab-wireless" role="tabpanel">
+    <!-- 无线 TAB -->
+    <div class="tab-pane fade {{if eq .ActiveTab `wireless`}}show active{{end}}" id="tab-wireless" role="tabpanel">
         {{if .Wireless}}
             {{range $r := .Wireless.Radios}}
             <div class="card shadow-sm mb-3">
@@ -167,6 +280,20 @@
                                     <label class="form-label mb-0">网络</label>
                                     <input name="network" class="form-control form-control-sm" value="lan" placeholder="lan">
                                 </div>
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label mb-0">MAC 过滤</label>
+                                    <select name="macfilter" class="form-select form-select-sm" data-maclist="maclist-add-{{$r.Section}}" onchange="onMacfilterChange(this)">
+                                        {{$.Wireless.MacfilterOptionsHTML}}
+                                    </select>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label mb-0">最大接入终端数</label>
+                                    <input name="maxsta" class="form-control form-control-sm" type="number" min="0" max="64" placeholder="0=不限" value="0">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label mb-0">MAC 地址列表（逗号/空格/换行分隔）</label>
+                                    <textarea name="maclist" id="maclist-add-{{$r.Section}}" class="form-control form-control-sm" rows="2" placeholder="AA:BB:CC:DD:EE:FF" disabled></textarea>
+                                </div>
                                 <div class="col-12">
                                     <div class="form-check form-check-inline">
                                         <input class="form-check-input" type="checkbox" name="hidden" value="1" id="add-hid-{{$r.Section}}">
@@ -192,6 +319,8 @@
                                 <span class="badge bg-primary ms-1">{{$s.Mode}}</span>
                                 <span class="badge bg-{{if eq $s.EncText `开放`}}secondary{{else}}success{{end}} ms-1">{{$s.EncText}}</span>
                                 {{if $s.Hidden}}<span class="badge bg-dark ms-1">隐藏</span>{{end}}
+                                {{if $s.Macfilter}}<span class="badge bg-warning text-dark ms-1">MAC过滤({{$s.Macfilter}})</span>{{end}}
+                                {{if $s.Maxsta}}<span class="badge bg-info text-dark ms-1">上限{{$s.Maxsta}}</span>{{end}}
                             </span>
                             <span>
                                 <button class="btn btn-outline-primary btn-sm py-0 px-2" data-bs-toggle="collapse" data-bs-target="#edit-ssid-{{$s.Section}}" aria-expanded="false" aria-controls="edit-ssid-{{$s.Section}}">编辑</button>
@@ -206,6 +335,8 @@
                             <tr><th class="table-light" style="width:140px;">section</th><td><code>{{$s.Section}}</code></td></tr>
                             <tr><th class="table-light">网络</th><td>{{$s.Network}}</td></tr>
                             <tr><th class="table-light">实时接口</th><td>{{if $s.Ifname}}<code>{{$s.Ifname}}</code>{{else}}—{{end}}</td></tr>
+                            {{if $s.Macfilter}}<tr><th class="table-light">MAC 过滤</th><td>{{$s.Macfilter}}{{if $s.Maclist}}（{{$s.Maclist}}）{{end}}</td></tr>{{end}}
+                            {{if $s.Maxsta}}<tr><th class="table-light">最大接入终端</th><td>{{$s.Maxsta}}</td></tr>{{end}}
                             </tbody>
                         </table>
                         <div class="collapse mt-2" id="edit-ssid-{{$s.Section}}">
@@ -229,11 +360,25 @@
                                         <input type="password" name="key" id="key-{{$s.Section}}" class="form-control form-control-sm"
                                                value="{{$s.Key}}" minlength="8" maxlength="63" autocomplete="new-password"
                                                {{if eq $s.Enc "none"}}disabled{{end}}>
-                                        <div class="text-muted" style="font-size:.72rem;">8-63 位；开放模式无需密码</div>
+                                        <div class="text-muted" style="font-size:.72rem;">8-63 位；留空保持原密码</div>
                                     </div>
                                     <div class="col-6 col-md-3">
                                         <label class="form-label mb-0">网络</label>
                                         <input name="network" class="form-control form-control-sm" value="{{$s.Network}}" placeholder="lan">
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <label class="form-label mb-0">MAC 过滤</label>
+                                        <select name="macfilter" class="form-select form-select-sm" data-maclist="maclist-{{$s.Section}}" onchange="onMacfilterChange(this)">
+                                            {{$s.MacfilterOptionsHTML}}
+                                        </select>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <label class="form-label mb-0">最大接入终端数</label>
+                                        <input name="maxsta" class="form-control form-control-sm" type="number" min="0" max="64" placeholder="0=不限" value="{{if $s.Maxsta}}{{$s.Maxsta}}{{else}}0{{end}}">
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="form-label mb-0">MAC 地址列表（逗号/空格/换行分隔）</label>
+                                        <textarea name="maclist" id="maclist-{{$s.Section}}" class="form-control form-control-sm" rows="2" {{if eq $s.Macfilter ""}}disabled{{end}}>{{$s.Maclist}}</textarea>
                                     </div>
                                     <div class="col-12">
                                         <div class="form-check form-check-inline">
@@ -267,6 +412,88 @@
         </div>
         {{end}}
     </div>
+
+    <!-- 客户端 TAB -->
+    <div class="tab-pane fade {{if eq .ActiveTab `clients`}}show active{{end}}" id="tab-clients" role="tabpanel">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white py-2 d-flex align-items-center">
+                <span class="small fw-semibold"><i class="fas fa-laptop me-1"></i> 接入客户端（iwinfo assoclist）</span>
+                <span class="badge bg-secondary ms-2">{{len .Clients}}</span>
+            </div>
+            <div class="card-body p-0">
+                {{if .Clients}}
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0 small">
+                        <thead>
+                            <tr class="table-light">
+                                <th>接口</th>
+                                <th>MAC 地址</th>
+                                <th>信号(dBm)</th>
+                                <th>速率</th>
+                                <th style="width:100px;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {{range .Clients}}
+                            <tr>
+                                <td><code>{{.Ifname}}</code></td>
+                                <td><code>{{.MAC}}</code></td>
+                                <td>{{.Signal}}</td>
+                                <td>{{.Rate}}</td>
+                                <td>
+                                    <form method="post" action="/devices/{{$.Device.DeviceID}}/config/clients/kick" class="d-inline" onsubmit="return kickClient(this);">
+                                        <input type="hidden" name="ifname" value="{{.Ifname}}">
+                                        <input type="hidden" name="mac" value="{{.MAC}}">
+                                        <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-2"><i class="fas fa-user-slash me-1"></i>踢下线</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {{end}}
+                        </tbody>
+                    </table>
+                </div>
+                {{else}}
+                <div class="text-muted small py-3 text-center">暂无接入客户端</div>
+                {{end}}
+            </div>
+        </div>
+    </div>
+
+    <!-- 日志 TAB -->
+    <div class="tab-pane fade {{if eq .ActiveTab `logs`}}show active{{end}}" id="tab-logs" role="tabpanel">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+                <span class="small fw-semibold"><i class="fas fa-file-alt me-1"></i> 系统日志（log read，最近 {{len .Logs}} 行）</span>
+                <a href="/devices/{{.Device.DeviceID}}/config?tab=logs" class="btn btn-outline-secondary btn-sm"><i class="fas fa-sync-alt me-1"></i> 刷新</a>
+            </div>
+            <div class="card-body p-0">
+                {{if .Logs}}
+                <div class="table-responsive" style="max-height:600px;overflow-y:auto;">
+                    <table class="table table-sm mb-0 small" style="font-family:monospace;">
+                        <thead class="sticky-top">
+                            <tr class="table-light">
+                                <th style="width:180px;">时间</th>
+                                <th style="width:90px;">来源</th>
+                                <th>消息</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {{range .Logs}}
+                            <tr>
+                                <td class="text-nowrap">{{.Time}}</td>
+                                <td><span class="badge bg-light text-dark">{{.Facility}}</span></td>
+                                <td style="word-break:break-all;">{{.Message}}</td>
+                            </tr>
+                        {{end}}
+                        </tbody>
+                    </table>
+                </div>
+                {{else}}
+                <div class="text-muted small py-3 text-center">无日志数据</div>
+                {{end}}
+            </div>
+        </div>
+    </div>
 </div>
 
 <div id="saving-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;">
@@ -287,7 +514,6 @@
 })();
 
 // 无线模式 → 频宽 联动：切换模式时按该模式支持的频宽（data-widths）重建下拉。
-// 例：ax → 20/40/80 MHz（由设备实时 htmodes 分组而来）；默认/禁用HT 时禁用频宽下拉。
 function onModeChange(sel) {
     var radio = sel.getAttribute('data-radio');
     var ws = document.getElementById('width-' + radio);
@@ -300,7 +526,6 @@ function onModeChange(sel) {
         ws.disabled = true;
         return;
     }
-    // 尽量保留上次选择的频宽（跨模式有效时），否则取第一项
     var cur = ws.getAttribute('data-cur') || '';
     var keep = (cur && widths.indexOf(cur) >= 0) ? cur : widths[0];
     ws.innerHTML = widths.map(function (w) {
@@ -310,7 +535,7 @@ function onModeChange(sel) {
     ws.setAttribute('data-cur', keep);
 }
 
-// 无线网卡参数提交：确认 → 显示保存遮罩 → 延迟提交（保证遮罩先渲染）。
+// 无线网卡参数提交：确认 → 显示保存遮罩 → 延迟提交。
 function saveRadio(form) {
     var msg = '确认修改 ' + form.radio.value + ' 参数？\n\n'
         + '信道/频宽/国家变更可能导致无线客户端断开连接。\n'
@@ -319,7 +544,6 @@ function saveRadio(form) {
     var ov = document.getElementById('saving-overlay');
     if (ov) {
         ov.style.display = 'flex';
-        // 兜底：请求异常卡住时 60 秒后自动移除遮罩，避免页面被锁死
         setTimeout(function () { ov.style.display = 'none'; }, 60000);
     }
     setTimeout(function () { form.submit(); }, 350);
@@ -338,7 +562,14 @@ function onEncChange(sel) {
     }
 }
 
-// SSID 新增/编辑提交：确认 → 遮罩 → 延迟提交（同 saveRadio 模式）。
+// MAC 过滤切换 → MAC 列表输入启用/禁用（不过滤时禁用）。
+function onMacfilterChange(sel) {
+    var ml = document.getElementById(sel.getAttribute('data-maclist'));
+    if (!ml) return;
+    ml.disabled = (sel.value === '');
+}
+
+// SSID 新增/编辑提交：确认 → 遮罩 → 延迟提交。
 function saveSSID(form) {
     var isAdd = !form.section;
     var name = form.ssid.value;
@@ -366,6 +597,22 @@ function delSSID(form) {
         setTimeout(function () { ov.style.display = 'none'; }, 60000);
     }
     setTimeout(function () { form.submit(); }, 350);
+    return false;
+}
+
+// 踢客户端下线：二次确认 → 提交。
+function kickClient(form) {
+    var mac = form.mac.value;
+    var ifname = form.ifname.value;
+    if (!confirm('确认踢下线客户端 ' + mac + '（接口 ' + ifname + '）？\n\n该客户端将被强制断开，60 秒内禁止重新接入。')) return false;
+    form.submit();
+    return false;
+}
+
+// 重启设备：危险操作二次确认 → 提交。
+function rebootDevice(form) {
+    if (!confirm('确认重启该设备？\n\n设备将在数秒后重启，约 1-2 分钟后恢复在线。\n重启期间设备不可达。')) return false;
+    form.submit();
     return false;
 }
 </script>

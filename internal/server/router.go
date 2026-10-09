@@ -32,6 +32,10 @@ func Mount(r *gin.Engine, app *App) {
 	protected.GET("/devices/:id", auth.RequirePermission(app.DB, "device:read"), app.handleDeviceDetail)
 	protected.GET("/devices/:id/wireless", auth.RequirePermission(app.DB, "wireless:read"), app.handleWireless)
 	protected.GET("/devices/:id/config", auth.RequirePermission(app.DB, "device:read"), app.handleDeviceConfig)
+	// 重启设备（system reboot），写操作需 device:write。
+	protected.POST("/devices/:id/config/reboot", auth.RequirePermission(app.DB, "device:write"), app.handleDeviceReboot)
+	// 踢无线客户端下线（hostapd del_client），写操作需 wireless:write。
+	protected.POST("/devices/:id/config/clients/kick", auth.RequirePermission(app.DB, "wireless:write"), app.handleDeviceKickClient)
 	// 无线网卡参数编辑（uci.set + uci.apply rollback，见 无线配置功能开发文档.md §5.3）。
 	protected.POST("/devices/:id/config/wireless/radio", auth.RequirePermission(app.DB, "wireless:write"), app.handleDeviceConfigRadioEdit)
 	// SSID 新增/编辑（section 空 = uci.add，否则 uci.set）与删除（uci.delete），见 §5.3 / §3.4 抓包参考。
