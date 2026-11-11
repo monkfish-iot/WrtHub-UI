@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "pages": [
+    {
+      "id": "login",
+      "name": "登录页",
+      "file": "index.html",
+      "fields": [
+        { "key": "page_title", "label": "页面标题", "type": "text", "default": "WiFi 认证上网", "maxlength": 64 },
+        { "key": "topic", "label": "卡片主标题", "type": "text", "default": "欢迎连接访客 WiFi", "maxlength": 64 },
+        { "key": "subtitle", "label": "副标题", "type": "text", "default": "完成认证即可免费上网", "maxlength": 64 },
+        { "key": "button_text", "label": "按钮文字", "type": "text", "default": "立即上网", "maxlength": 32 },
+        { "key": "footer", "label": "页脚文案", "type": "text", "default": "连接即表示同意《上网服务条款》", "maxlength": 128 },
+        { "key": "bg_color", "label": "页面背景色", "type": "color", "default": "#2563eb", "help": "默认值为蓝色渐变背景" },
+        { "key": "btn_color", "label": "按钮颜色", "type": "color", "default": "#2563eb" },
+        { "key": "bg_image", "label": "页面背景图", "type": "image", "help": "选择后覆盖背景色" }
+      ]
+    },
+    {
+      "id": "success",
+      "name": "成功页",
+      "file": "success.html",
+      "fields": [
+        { "key": "success_topic", "label": "成功页主标题", "type": "text", "default": "认证成功", "maxlength": 64 },
+        { "key": "success_subtitle", "label": "成功页副标题", "type": "text", "default": "您已接入网络，可以开始上网了", "maxlength": 64 }
+      ]
+    }
+  ]
+}

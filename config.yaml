@@ -9,7 +9,7 @@ frps_helper:
   base_url: "https://127.0.0.1:7443"
   tls_insecure: true
   credential_query: true
-  request_timeout: "10s"
+  request_timeout: "10s"              # 首次启动种子进 DB（settings 表）；此后改本项不生效，请在「系统设置」页修改
 
 device_rpc:
   scheme: "http"
@@ -17,13 +17,13 @@ device_rpc:
   port: 20001                         # 固定但可配
   auth_path: "/auth"
   rpc_path_prefix: "/cgi-bin/luci/rpc"
-  token_cache_ttl: "5m"
-  timeout: "10s"
-  upload_timeout: "30m"               # cgi-io 固件上传专用超时（大文件慢操作，须远大于 timeout）
+  token_cache_ttl: "5m"               # 首次启动种子进 DB；此后在「系统设置」页修改
+  timeout: "10s"                      # 同上
+  upload_timeout: "30m"               # cgi-io 固件上传专用超时（大文件慢操作，须远大于 timeout）；同上
   max_concurrency: 4                  # 单设备并发上限
 
 auth:
-  mode: "local"                       # local | casdoor
+  mode: "local"                       # 平台登录认证方式：local | casdoor（casdoor 待实现）
   init_username: "admin"              # 首次启动自动创建的管理员用户名
   init_password: "admin@123"         # 首次启动自动创建的管理员初始密码；请尽快登录后修改
 
@@ -39,3 +39,9 @@ assets:
 firmware:
   root: "./firmware"                 # 固件库根目录（按设备型号分子目录）
   max_size_mb: 512                   # 单固件文件大小上限（MB）
+
+# 同机被监控服务（概况页「服务运行状态」展示用，仅探测、不修改）
+services:
+  portal_server:
+    base_url: "http://127.0.0.1:19090"  # portal-server /healthz 地址
+    timeout: "3s"

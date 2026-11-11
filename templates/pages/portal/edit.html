@@ -1,0 +1,303 @@
+{{define "content"}}
+{{if .FlashOK}}<div class="alert alert-success alert-dismissible fade show py-1 px-2 small mb-2">{{.FlashOK}}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{{end}}
+{{if .FlashErr}}<div class="alert alert-danger alert-dismissible fade show py-1 px-2 small mb-2">{{.FlashErr}}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{{end}}
+{{if .SchemaErr}}<div class="alert alert-warning py-1 px-2 small mb-2"><i class="fas fa-triangle-exclamation me-1"></i> {{.SchemaErr}}（可视化编辑不可用，可用源码编辑修复）</div>{{end}}
+
+<div class="card shadow-sm mb-2">
+    <div class="card-header d-flex justify-content-between align-items-center bg-white py-1 px-2">
+        <span class="small fw-semibold">
+            <i class="fas fa-pen-to-square me-1"></i> {{.Tpl.Name}}
+            <span class="text-muted ms-2 fw-normal">共 {{len .Files}} 个文件 · {{fsize .Tpl.TotalSize}} · 入口 <code>{{.Tpl.EntryPage}}</code></span>
+        </span>
+        <span class="d-flex gap-1">
+            <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2" data-bs-toggle="modal" data-bs-target="#newFileModal" title="新建文件"><i class="fas fa-plus"></i></button>
+            <a href="/portal/templates/{{.Tpl.ID}}/preview/{{.Path}}" target="_blank" class="btn btn-outline-secondary btn-sm py-0 px-2" title="新窗口预览"><i class="fas fa-up-right-from-square"></i></a>
+            <a href="/portal/templates" class="btn btn-outline-secondary btn-sm py-0 px-2" title="返回模板列表"><i class="fas fa-arrow-left"></i></a>
+        </span>
+    </div>
+    {{if .Visual}}
+    <div class="card-header bg-white py-0 px-2">
+        <ul class="nav nav-tabs card-header-tabs">
+            <li class="nav-item"><a class="nav-link py-1{{if eq .Tab "visual"}} active{{end}}" href="#" data-tab="visual"><i class="fas fa-sliders me-1"></i> 可视化编辑</a></li>
+            <li class="nav-item"><a class="nav-link py-1{{if ne .Tab "visual"}} active{{end}}" href="#" data-tab="source"><i class="fas fa-file-code me-1"></i> 源码编辑</a></li>
+        </ul>
+    </div>
+    {{end}}
+</div>
+
+{{if .Visual}}
+<!-- ============ 可视化编辑 ============ -->
+<div id="paneVisual"{{if ne .Tab "visual"}} class="d-none"{{end}}>
+<div class="row g-2">
+    <div class="col-md-5 order-2">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white py-1 px-2 d-flex justify-content-between align-items-center">
+                <span class="small fw-semibold"><i class="fas fa-sliders me-1"></i> 页面属性</span>
+                <span id="cfgDirtyBadge" class="badge bg-success">已保存</span>
+            </div>
+            <form method="post" action="/portal/templates/{{.Tpl.ID}}/config" id="cfgForm">
+            {{if gt (len .Pages) 1}}
+            <div class="card-header bg-white py-1 px-2 border-bottom">
+                <ul class="nav nav-pills nav-fill small">
+                    {{range $i, $p := .Pages}}
+                    <li class="nav-item"><a class="nav-link py-0{{if eq $i 0}} active{{end}}" href="#" data-cfgpage="{{$p.ID}}">{{$p.Name}}</a></li>
+                    {{end}}
+                </ul>
+            </div>
+            {{end}}
+            <div class="card-body p-2">
+                {{range $i, $p := .Pages}}
+                <div class="cfg-page{{if ne $i 0}} d-none{{end}}" data-cfgpage="{{$p.ID}}" data-file="{{$p.File}}">
+                    {{range $p.Fields}}
+                    <div class="mb-2">
+                        <label class="form-label small fw-semibold mb-1">{{.Label}} <code class="text-muted">{{.Key}}</code></label>
+                        {{if eq .Type "text"}}
+                        <input type="text" class="form-control form-control-sm cfg-input" name="{{.Key}}"
+                               value="{{.Value}}" placeholder="{{.Default}}" maxlength="{{.MaxLength}}">
+                        {{else if eq .Type "color"}}
+                        <div class="input-group input-group-sm">
+                            <input type="color" class="form-control form-control-color cfg-color"
+                                   data-key="{{.Key}}" value="{{if .Value}}{{.Value}}{{else if .Default}}{{.Default}}{{else}}#000000{{end}}" title="选择颜色">
+                            <input type="hidden" class="cfg-color-val" name="{{.Key}}" value="{{.Value}}">
+                            <button type="button" class="btn btn-outline-secondary cfg-color-reset" data-key="{{.Key}}" data-default="{{.Default}}">默认</button>
+                        </div>
+                        {{else if eq .Type "image"}}
+                        <select class="form-select form-select-sm cfg-input" name="{{.Key}}">
+                            <option value="">（无）</option>
+                            {{$fv := .Value}}{{range $.Images}}<option value="{{.}}"{{if eq . $fv}} selected{{end}}>{{.}}</option>{{end}}
+                        </select>
+                        {{end}}
+                        {{if .Help}}<div class="form-text small">{{.Help}}</div>{{end}}
+                    </div>
+                    {{end}}
+                </div>
+                {{end}}
+            </div>
+            <div class="card-footer bg-white d-flex justify-content-between align-items-center py-1 px-2">
+                <span class="small text-muted">改动即时预览，保存后才生效</span>
+                <span class="d-flex gap-1">
+                    <a href="/portal/templates/{{.Tpl.ID}}/files?tab=visual" class="btn btn-outline-secondary btn-sm py-0 px-2"><i class="fas fa-rotate-left"></i></a>
+                    <button type="submit" class="btn btn-primary btn-sm py-0 px-2"><i class="fas fa-floppy-disk me-1"></i> 保存</button>
+                </span>
+            </div>
+            </form>
+        </div>
+    </div>
+    <div class="col-md-7 order-1">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white py-1 px-2 small fw-semibold"><i class="fas fa-eye me-1"></i> 实时预览</div>
+            <div class="card-body p-1">
+                <iframe id="pvVisual" src="/portal/templates/{{.Tpl.ID}}/preview/{{(index .Pages 0).File}}?t={{.NowUnix}}"
+                        style="width:100%;display:block;height:calc(100vh - 260px);min-height:440px;border:0;border-radius:4px;background:#fff;"></iframe>
+            </div>
+        </div>
+    </div>
+</div>
+</div>
+{{end}}
+
+<!-- ============ 源码编辑（左预览 / 右编辑） ============ -->
+<style>
+    .pane-media { width: 100%; height: calc(100vh - 240px); min-height: 400px; max-height: 820px; border: 1px solid #5e6f85; border-radius: 4px; background: #fff; }
+    .pane-code  { width: 100%; height: calc(100vh - 240px); min-height: 400px; max-height: 820px; resize: vertical; font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace; font-size: 12.5px; line-height: 1.5; border: 1px solid #5e6f85; border-radius: 4px; padding: 8px; tab-size: 2; }
+    @media (max-width: 991.98px) { .pane-media, .pane-code { height: 420px; } }
+</style>
+<div id="paneSource"{{if and .Visual (eq .Tab "visual")}} class="d-none"{{end}}>
+<div class="card shadow-sm">
+    <div class="card-header bg-white py-0 px-1 d-flex align-items-center">
+        <ul class="nav nav-tabs card-header-tabs flex-nowrap border-0 flex-grow-1 mb-0" style="overflow-x:auto;overflow-y:hidden;min-width:0;">
+            {{range .Tabs}}
+            <li class="nav-item">
+                <a class="nav-link py-1 px-2 small text-nowrap{{if eq .Path $.Path}} active{{end}}" href="/portal/templates/{{$.Tpl.ID}}/files?path={{.Path}}&tab=source" title="{{.Path}} ({{fsize .Size}})">
+                    {{if eq .Path $.Tpl.EntryPage}}<i class="fas fa-house-chimney small me-1"></i>{{else if not .Text}}<i class="fas fa-file-image small me-1"></i>{{end}}{{.Path}}
+                </a>
+            </li>
+            {{end}}
+        </ul>
+        <span class="d-flex gap-1 py-1 align-items-center flex-shrink-0">
+            <span id="dirtyBadge" class="badge bg-success d-none">未保存</span>
+            {{if and .Editable (not .Oversize)}}
+            <button type="submit" form="editForm" class="btn btn-primary btn-sm py-0 px-2 text-nowrap" title="保存 (Ctrl+S)"><i class="fas fa-floppy-disk me-1"></i> 保存</button>
+            {{end}}
+            {{if ne .Path .Tpl.EntryPage}}
+            <form method="post" action="/portal/templates/{{.Tpl.ID}}/files/delete" class="d-inline"
+                  onsubmit="return confirm('确认删除文件 {{.Path}} ？')">
+                <input type="hidden" name="path" value="{{.Path}}">
+                <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-2 text-nowrap" title="删除当前文件"><i class="fas fa-trash"></i></button>
+            </form>
+            {{end}}
+        </span>
+    </div>
+    <div class="card-body p-1">
+        <div class="row g-1">
+            <div class="col-md-6">
+                <iframe class="pane-media" src="/portal/templates/{{.Tpl.ID}}/preview/{{.Path}}?t={{.NowUnix}}"></iframe>
+            </div>
+            <div class="col-md-6">
+            {{if not .Editable}}
+                <div class="alert alert-secondary small mb-0 py-2">
+                    <i class="fas fa-circle-info me-1"></i> 该文件为二进制 / 图片资源，不支持在线编辑。可查看左侧预览或替换模板 zip 包。
+                </div>
+            {{else if .Oversize}}
+                <div class="alert alert-warning small mb-0 py-2">
+                    <i class="fas fa-triangle-exclamation me-1"></i> 文件超过单文件 512KB 编辑上限，请下载修改后重新上传模板 zip 包。
+                </div>
+            {{else}}
+                <form method="post" action="/portal/templates/{{.Tpl.ID}}/files/save" id="editForm">
+                    <input type="hidden" name="path" value="{{.Path}}">
+                    <textarea id="codeArea" class="pane-code" name="content" spellcheck="false">{{.Content}}</textarea>
+                </form>
+            {{end}}
+            </div>
+        </div>
+    </div>
+</div>
+</div>
+
+<!-- 新建文件 -->
+<div class="modal fade" id="newFileModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <form method="post" action="/portal/templates/{{.Tpl.ID}}/files/create">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="fas fa-plus me-1"></i> 新建文件</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body py-2">
+                    <input type="text" name="path" class="form-control form-control-sm" placeholder="如 css/main.css" required autofocus>
+                    <div class="form-text small mt-1">支持 html / css / js / json / xml / txt，单文件 ≤ 512KB。</div>
+                </div>
+                <div class="modal-footer py-1">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary btn-sm">创建</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    'use strict';
+    var tid = '{{.Tpl.ID}}';
+    var dirtyFlags = { source: false, visual: false };
+
+    /* ---------- 模式 tab（可视化 / 源码） ---------- */
+    document.querySelectorAll('[data-tab]').forEach(function (a) {
+        a.addEventListener('click', function (e) {
+            e.preventDefault();
+            var tab = this.getAttribute('data-tab');
+            document.querySelectorAll('[data-tab]').forEach(function (x) { x.classList.toggle('active', x === a); });
+            var pv = document.getElementById('paneVisual'), ps = document.getElementById('paneSource');
+            if (pv) pv.classList.toggle('d-none', tab !== 'visual');
+            if (ps) ps.classList.toggle('d-none', tab !== 'source');
+        });
+    });
+
+    window.addEventListener('beforeunload', function (e) {
+        if (dirtyFlags.source || dirtyFlags.visual) { e.preventDefault(); e.returnValue = ''; }
+    });
+
+    /* ---------- 可视化编辑 ---------- */
+    var cfgForm = document.getElementById('cfgForm');
+    var pvVisual = document.getElementById('pvVisual');
+    var cfgBadge = document.getElementById('cfgDirtyBadge');
+    if (cfgForm && pvVisual) {
+        var curFile = pvVisual.src.split('/preview/')[1].split('?')[0];
+        var debounceTimer = null;
+
+        function markCfgDirty(on) {
+            dirtyFlags.visual = on;
+            if (!cfgBadge) return;
+            if (on) { cfgBadge.className = 'badge bg-warning text-dark'; cfgBadge.textContent = '未保存'; }
+            else { cfgBadge.className = 'badge bg-success'; cfgBadge.textContent = '已保存'; }
+        }
+        function collectQuery() {
+            var q = [];
+            cfgForm.querySelectorAll('.cfg-input, .cfg-color-val').forEach(function (el) {
+                var v = el.value;
+                if (v) q.push(encodeURIComponent(el.name) + '=' + encodeURIComponent(v));
+            });
+            return q.join('&');
+        }
+        function refreshVisual() {
+            var q = collectQuery();
+            pvVisual.src = '/portal/templates/' + tid + '/preview/' + curFile + '?' + (q ? q + '&' : '') + 't=' + Date.now();
+        }
+        function scheduleRefresh() {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(refreshVisual, 400);
+        }
+
+        document.querySelectorAll('[data-cfgpage]').forEach(function (a) {
+            if (a.tagName !== 'A') return;
+            a.addEventListener('click', function (e) {
+                e.preventDefault();
+                var id = this.getAttribute('data-cfgpage');
+                document.querySelectorAll('a[data-cfgpage]').forEach(function (x) { x.classList.toggle('active', x === a); });
+                document.querySelectorAll('.cfg-page').forEach(function (d) {
+                    var on = d.getAttribute('data-cfgpage') === id;
+                    d.classList.toggle('d-none', !on);
+                    if (on) curFile = d.getAttribute('data-file');
+                });
+                refreshVisual();
+            });
+        });
+
+        cfgForm.querySelectorAll('.cfg-input').forEach(function (el) {
+            el.addEventListener('input', function () { markCfgDirty(true); scheduleRefresh(); });
+            el.addEventListener('change', function () { markCfgDirty(true); scheduleRefresh(); });
+        });
+        cfgForm.querySelectorAll('.cfg-color').forEach(function (picker) {
+            var key = picker.getAttribute('data-key');
+            var hidden = cfgForm.querySelector('.cfg-color-val[name="' + key + '"]');
+            picker.addEventListener('input', function () {
+                hidden.value = picker.value;
+                markCfgDirty(true); scheduleRefresh();
+            });
+        });
+        cfgForm.querySelectorAll('.cfg-color-reset').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var key = this.getAttribute('data-key');
+                var hidden = cfgForm.querySelector('.cfg-color-val[name="' + key + '"]');
+                var picker = cfgForm.querySelector('.cfg-color[data-key="' + key + '"]');
+                hidden.value = '';
+                picker.value = this.getAttribute('data-default') || '#000000';
+                markCfgDirty(true); scheduleRefresh();
+            });
+        });
+        cfgForm.addEventListener('submit', function () { markCfgDirty(false); });
+    }
+
+    /* ---------- 源码编辑 ---------- */
+    var area = document.getElementById('codeArea');
+    var badge = document.getElementById('dirtyBadge');
+    var form = document.getElementById('editForm');
+    if (area && badge && form) {
+        function markDirty(on) {
+            dirtyFlags.source = on;
+            badge.classList.toggle('d-none', !on);
+            if (on) { badge.className = 'badge bg-warning text-dark'; badge.textContent = '未保存'; }
+            else { badge.className = 'badge bg-success d-none'; badge.textContent = '已保存'; }
+        }
+        area.addEventListener('input', function () { markDirty(true); });
+        area.addEventListener('keydown', function (e) {
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                var s = this.selectionStart, t = this.selectionEnd;
+                this.value = this.value.slice(0, s) + '  ' + this.value.slice(t);
+                this.selectionStart = this.selectionEnd = s + 2;
+                markDirty(true);
+            }
+        });
+        form.addEventListener('submit', function () { markDirty(false); });
+        document.addEventListener('keydown', function (e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                e.preventDefault();
+                if (dirtyFlags.source) form.submit();
+            }
+        });
+    }
+})();
+</script>
+{{end}}

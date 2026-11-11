@@ -38,6 +38,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"wrthub-ui/internal/lucirpc"
@@ -58,12 +59,16 @@ type Options struct {
 
 // Client 是 UBUS JSON-RPC 客户端，作为 lucirpc 失败时的兜底访问方法。
 // token 来源为 lucirpc.Client（/auth 的 luci_token），不独立缓存。
+// 普通/上传超时以 atomic 存放、逐请求经 context 生效，支持 SetTimeouts 运行时热更新。
 type Client struct {
 	http       *http.Client
-	httpUpload *http.Client // cgi-io 固件上传专用（长超时），与 http 分开避免大文件被 10s 超时中断
+	httpUpload *http.Client // cgi-io 固件上传专用，与 http 分开避免大文件占用普通调用语义
 	opts       Options
 	rpc        *lucirpc.Client // token 来源（/auth luci_token，实测可直接用于 /ubus）
 	log        *slog.Logger
+
+	timeout       atomic.Int64 // 单请求超时（纳秒）
+	uploadTimeout atomic.Int64 // cgi-io 上传超时（纳秒）
 
 	semMu sync.Mutex
 	sems  map[string]chan struct{}
@@ -76,13 +81,26 @@ func New(opts Options, rpc *lucirpc.Client, log *slog.Logger) *Client {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Client{
-		http:       &http.Client{Timeout: opts.Timeout},
-		httpUpload: &http.Client{Timeout: opts.UploadTimeout},
+	c := &Client{
+		http:       &http.Client{},
+		httpUpload: &http.Client{},
 		opts:       opts,
 		rpc:        rpc,
 		log:        log,
 		sems:       make(map[string]chan struct{}),
+	}
+	c.timeout.Store(int64(opts.Timeout))
+	c.uploadTimeout.Store(int64(opts.UploadTimeout))
+	return c
+}
+
+// SetTimeouts 热更新普通/上传单请求超时（作用于后续请求；<=0 的项忽略）。
+func (c *Client) SetTimeouts(timeout, uploadTimeout time.Duration) {
+	if timeout > 0 {
+		c.timeout.Store(int64(timeout))
+	}
+	if uploadTimeout > 0 {
+		c.uploadTimeout.Store(int64(uploadTimeout))
 	}
 }
 
@@ -110,15 +128,25 @@ func applyDefaults(o *Options) {
 	}
 }
 
-func (c *Client) host(sessionID string) string {
-	return fmt.Sprintf("%s://%s.%s:%d", c.opts.Scheme, sessionID, c.opts.DomainSuffix, c.opts.Port)
+// host 返回设备访问基地址：复用 lucirpc 的隧道/直连解析（同一 session_id）。
+func (c *Client) host(ctx context.Context, sessionID string) (string, error) {
+	if c.rpc != nil {
+		return c.rpc.Host(ctx, sessionID)
+	}
+	return fmt.Sprintf("%s://%s.%s:%d", c.opts.Scheme, sessionID, c.opts.DomainSuffix, c.opts.Port), nil
 }
 
 // callUbus 单次 ubus 调用；retry=true 表示疑似 token 失效（result[0]=6 或 HTTP 401/403），应联动失效重试；
 // empty=true 表示调用成功但无数据（result[0]=0 且 result[1] 为空），由 Call 决定是否重取 token 重试。
 // 所有日志均带完整请求 URL 与响应体片段，便于对照手工 curl 排查（用户要求）。
 func (c *Client) callUbus(ctx context.Context, sessionID, token string, reqID int, obj, method string, params map[string]any) (json.RawMessage, bool, bool, error) {
-	u := c.host(sessionID) + c.opts.UbusPath
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(c.timeout.Load()))
+	defer cancel()
+	base, err := c.host(ctx, sessionID)
+	if err != nil {
+		return nil, false, false, fmt.Errorf("resolve device host: %w", err)
+	}
+	u := base + c.opts.UbusPath
 	body, _ := json.Marshal(jsonrpcRequest{
 		JSONRPC: "2.0",
 		ID:      reqID,
@@ -140,7 +168,7 @@ func (c *Client) callUbus(ctx context.Context, sessionID, token string, reqID in
 	if err != nil {
 		c.log.Warn("ubus: http request failed",
 			"url", u, "session_id", sessionID, "obj", obj, "method", method, "err", err)
-		return nil, false, false, err
+		return nil, false, false, fmt.Errorf("%w：ubus 请求失败（%v）", lucirpc.ErrUnreachable, err)
 	}
 	defer resp.Body.Close()
 	dataBytes, _ := io.ReadAll(resp.Body)
@@ -155,17 +183,21 @@ func (c *Client) callUbus(ctx context.Context, sessionID, token string, reqID in
 	if resp.StatusCode != http.StatusOK {
 		// 错误信息只回显简短原因（完整响应体见日志），避免把 frps 的 404 HTML 页面
 		// 整段拼进页面提示：设备重启/离线时隧道不可达，frps 会返回 “powered by frp” 的 404 页。
-		hint := "设备未响应"
+		hint, unreachable := "设备未响应", false
 		switch {
 		case bytes.Contains(dataBytes, []byte("powered by frp")):
-			hint = "设备隧道不可达（设备可能正在重启或离线）"
-		case bytes.Contains(dataBytes, []byte("<html")):
-			hint = "设备返回了非预期页面（可能未运行 Web/RPC 服务）"
+			hint, unreachable = "设备隧道不可达（设备可能正在重启或离线）", true
+		case bytes.Contains(dataBytes, []byte("<html")), bytes.Contains(dataBytes, []byte("<!DOCTYPE")):
+			hint, unreachable = "设备返回了非预期页面（可能未运行 Web/RPC 服务）", true
 		}
 		c.log.Warn("ubus: non-200",
 			"url", u, "session_id", sessionID, "obj", obj, "method", method,
 			"status", resp.StatusCode, "body_head", head(dataBytes, 256))
-		return nil, false, false, fmt.Errorf("ubus http %d（%s）", resp.StatusCode, hint)
+		err := fmt.Errorf("ubus http %d（%s）", resp.StatusCode, hint)
+		if unreachable {
+			err = fmt.Errorf("%w：%v", lucirpc.ErrUnreachable, err)
+		}
+		return nil, false, false, err
 	}
 	var rr jsonrpcResponse
 	if err := json.Unmarshal(dataBytes, &rr); err != nil {
@@ -179,7 +211,7 @@ func (c *Client) callUbus(ctx context.Context, sessionID, token string, reqID in
 		c.log.Warn("ubus: jsonrpc error",
 			"url", u, "session_id", sessionID, "obj", obj, "method", method,
 			"code", rr.Error.Code, "message", rr.Error.Message, "body_head", head(dataBytes, 256))
-		return nil, false, false, fmt.Errorf("ubus jsonrpc %d: %s", rr.Error.Code, rr.Error.Message)
+		return nil, false, false, &RPCError{Code: rr.Error.Code, Message: rr.Error.Message}
 	}
 	// result: [code, data]
 	var arr []json.RawMessage
@@ -375,7 +407,15 @@ func (c *Client) cgiUploadOnce(ctx context.Context, sessionID, token, remotePath
 		return nil, fmt.Errorf("关闭表单失败: %w", err)
 	}
 
-	u := c.host(sessionID) + "/cgi-bin/cgi-upload"
+	// 上传专用长超时（独立于普通调用，热更新经 SetTimeouts）：固件多为数 MB~数百 MB，
+	// 经 frp 隧道传输远超普通调用，套用普通调用的短超时必然触发 context deadline exceeded。
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(c.uploadTimeout.Load()))
+	defer cancel()
+	base, err := c.host(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("解析设备地址失败: %w", err)
+	}
+	u := base + "/cgi-bin/cgi-upload"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, body)
 	if err != nil {
 		return nil, fmt.Errorf("构造上传请求失败: %w", err)
@@ -384,8 +424,6 @@ func (c *Client) cgiUploadOnce(ctx context.Context, sessionID, token, remotePath
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 
 	c.log.Info("cgi-upload: start", "session_id", sessionID, "url", u, "size", body.Len())
-	// 使用上传专用 client（长超时）：固件多为数 MB~数百 MB，经 frp 隧道传输远超普通调用，
-	// 复用 10s 的 c.http 必然触发 context deadline exceeded（Client.Timeout）。
 	resp, err := c.httpUpload.Do(req)
 	if err != nil {
 		c.log.Warn("cgi-upload: request failed", "session_id", sessionID, "url", u, "size", body.Len(), "err", err)

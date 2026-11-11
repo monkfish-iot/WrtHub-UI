@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync/atomic"
 	"time"
 )
 
@@ -19,9 +20,11 @@ type Options struct {
 }
 
 // Client 是 frps_helper 北向接口客户端。
+// 超时以 atomic 存放、逐请求经 context 生效，支持 SetTimeout 运行时热更新。
 type Client struct {
-	http *http.Client
-	base string
+	http    *http.Client
+	base    string
+	timeout atomic.Int64 // 单请求超时（纳秒）
 }
 
 // New 构造 frps_helper 客户端。
@@ -33,9 +36,18 @@ func New(opts Options) *Client {
 	if timeout == 0 {
 		timeout = 10 * time.Second
 	}
-	return &Client{
-		http: &http.Client{Transport: tr, Timeout: timeout},
+	c := &Client{
+		http: &http.Client{Transport: tr},
 		base: opts.BaseURL,
+	}
+	c.timeout.Store(int64(timeout))
+	return c
+}
+
+// SetTimeout 热更新单请求超时（作用于后续请求；<=0 忽略）。
+func (c *Client) SetTimeout(d time.Duration) {
+	if d > 0 {
+		c.timeout.Store(int64(d))
 	}
 }
 
@@ -52,6 +64,11 @@ func (c *Client) get(ctx context.Context, path string, query url.Values) ([]byte
 }
 
 func (c *Client) do(req *http.Request) ([]byte, error) {
+	// 逐请求 context 超时（代替 http.Client.Timeout），配合 SetTimeout 热更新；
+	// 响应体在本函数内读取完毕，defer cancel 不影响调用方。
+	ctx, cancel := context.WithTimeout(req.Context(), time.Duration(c.timeout.Load()))
+	defer cancel()
+	req = req.WithContext(ctx)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err

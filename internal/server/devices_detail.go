@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -11,6 +12,8 @@ import (
 
 	"wrthub-ui/internal/auth"
 	"wrthub-ui/internal/frpsclient"
+	"wrthub-ui/internal/lucirpc"
+	"wrthub-ui/internal/ubusrpc"
 )
 
 // netDevRow 是网络接口表格的单行视图（来自 ubus luci-rpc getNetworkDevices）。
@@ -38,7 +41,10 @@ type deviceDetailPage struct {
 	LanIP     string // UBUS luci-rpc getNetworkDevices 现拉：网桥（br-lan）首个 IPv4
 	NetDevs   []netDevRow
 	NetIfaces []netIfaceRow
-	RPCError  string // 设备调用失败提示（不影响页面渲染）
+	RPCError  string                       // 设备调用失败提示（不影响页面渲染）
+	Rad       *frpsclient.DeviceRadiusItem // 每设备 RADIUS 对接参数（北向管理接口）
+	FlashOK   string
+	FlashErr  string
 }
 
 // handleDeviceDetail 渲染设备详情页。
@@ -52,7 +58,10 @@ func (a *App) handleDeviceDetail(c *gin.Context) {
 		return
 	}
 
-	host := a.Cfg.DeviceHost(dev.SessionID)
+	host, herr := a.RPC.Host(c.Request.Context(), dev.SessionID)
+	if herr != nil {
+		host = a.Cfg.DeviceHost(dev.SessionID)
+	}
 	serial := deviceID // 默认降级
 	lanIP := ""
 	rpcErr := ""
@@ -63,8 +72,10 @@ func (a *App) handleDeviceDetail(c *gin.Context) {
 	var netIfaces []netIfaceRow
 	if dev.SessionID != "" && dev.Status == "online" {
 		var board map[string]any
+		unreachable := false
 		if uerr := a.Ubus.CallInto(c.Request.Context(), dev.SessionID, "system", "board", &board, map[string]any{}); uerr != nil {
-			rpcErr = uerr.Error()
+			unreachable = errors.Is(uerr, lucirpc.ErrUnreachable)
+			rpcErr = friendlyDeviceErr(uerr)
 			a.Log.Warn("device detail: ubus system.board failed",
 				"device_id", deviceID, "session_id", dev.SessionID, "err", uerr)
 			board = nil
@@ -72,35 +83,63 @@ func (a *App) handleDeviceDetail(c *gin.Context) {
 		if s := pickStr(board, "board_id", "serial", "serial_number", "boardname", "board_name"); s != "" {
 			serial = s
 		}
-		// 全量网卡（用户要求展示）：luci-rpc getNetworkDevices，
-		// 同时取网桥首个 IPv4 作为内网管理 IP（原 todo8）
-		nd, nerr := fetchNetDevs(c.Request.Context(), a, dev.SessionID)
-		if nerr != nil {
-			if rpcErr != "" {
-				rpcErr += "；"
-			}
-			rpcErr += "网络接口: " + nerr.Error()
-			a.Log.Warn("device detail: ubus getNetworkDevices failed",
-				"device_id", deviceID, "session_id", dev.SessionID, "err", nerr)
+		if unreachable {
+			// 隧道不可达：不再逐项重试（每项都要等一次超时），统一提示
+			a.Log.Info("device detail: device unreachable, remaining rpc skipped", "device_id", deviceID)
 		} else {
-			netDevs = nd.rows
-			lanIP = nd.lanIP
-		}
-		// 逻辑接口状态（lan/wan/loopback）：ubus network.interface dump
-		ifs, ierr := fetchNetIfaces(c.Request.Context(), a, dev.SessionID)
-		if ierr != nil {
-			if rpcErr != "" {
-				rpcErr += "；"
+			// 全量网卡（用户要求展示）：luci-rpc getNetworkDevices，
+			// 同时取网桥首个 IPv4 作为内网管理 IP（原 todo8）
+			nd, nerr := fetchNetDevs(c.Request.Context(), a, dev.SessionID)
+			if nerr != nil {
+				if ubusrpc.IsObjectNotFound(nerr) {
+					// 设备未安装 rpcd-mod-luci（无 luci-rpc 对象）：跳过该表，改由逻辑接口表展示
+					a.Log.Info("device detail: luci-rpc getNetworkDevices unavailable (object not found), skipped",
+						"device_id", deviceID, "session_id", dev.SessionID)
+				} else {
+					if rpcErr != "" {
+						rpcErr += "；"
+					}
+					rpcErr += "网络接口: " + friendlyDeviceErr(nerr)
+					a.Log.Warn("device detail: ubus getNetworkDevices failed",
+						"device_id", deviceID, "session_id", dev.SessionID, "err", nerr)
+				}
+			} else {
+				netDevs = nd.rows
+				lanIP = nd.lanIP
 			}
-			rpcErr += "逻辑接口: " + ierr.Error()
-			a.Log.Warn("device detail: ubus network.interface dump failed",
-				"device_id", deviceID, "session_id", dev.SessionID, "err", ierr)
-		} else {
-			netIfaces = ifs
+			// 逻辑接口状态（lan/wan/loopback）：ubus network.interface dump
+			ifs, ierr := fetchNetIfaces(c.Request.Context(), a, dev.SessionID)
+			if ierr != nil {
+				if rpcErr != "" {
+					rpcErr += "；"
+				}
+				rpcErr += "逻辑接口: " + friendlyDeviceErr(ierr)
+				a.Log.Warn("device detail: ubus network.interface dump failed",
+					"device_id", deviceID, "session_id", dev.SessionID, "err", ierr)
+			} else {
+				netIfaces = ifs
+			}
 		}
 	} else if dev.Status != "online" {
 		a.Log.Info("device detail: skip rpc for non-online device",
 			"device_id", deviceID, "status", dev.Status)
+	}
+	// getNetworkDevices 不可用时，内网管理 IP 退回逻辑接口（lan）的首个 IPv4
+	if lanIP == "" && len(netIfaces) > 0 {
+		lanIP = lanIPFromIfaces(netIfaces)
+	}
+
+	// 每设备 RADIUS 对接参数（北向管理接口，best-effort）
+	var rad *frpsclient.DeviceRadiusItem
+	if lr, rerr := a.Frps.ListDeviceRadius(c.Request.Context(), 1, 20, deviceID); rerr == nil {
+		for i := range lr.Items {
+			if lr.Items[i].DeviceID == deviceID {
+				rad = &lr.Items[i]
+				break
+			}
+		}
+	} else {
+		a.Log.Warn("device detail: list device radius failed", "device_id", deviceID, "err", rerr)
 	}
 
 	u, _ := auth.CurrentUser(c)
@@ -113,6 +152,9 @@ func (a *App) handleDeviceDetail(c *gin.Context) {
 		NetDevs:   netDevs,
 		NetIfaces: netIfaces,
 		RPCError:  rpcErr,
+		Rad:       rad,
+		FlashOK:   c.Query("ok"),
+		FlashErr:  c.Query("err"),
 	}
 	c.Status(http.StatusOK)
 	if rerr := a.Render.Render(c.Writer, "pages/devices/detail", pg); rerr != nil {
@@ -253,6 +295,15 @@ type netIfaceRow struct {
 	DNS    string
 	Routes string // 0.0.0.0/0 → 10.10.10.1
 	Extra  string // data 摘要（dhcpserver/hostname/leasetime）
+
+	neighbors []netNeighbor // 邻居表（ARP），设备无 luci-rpc 时用于构建主机表
+}
+
+// netNeighbor 是 network.interface dump 响应 neighbors[] 的单条邻居（ARP 表项）。
+type netNeighbor struct {
+	IP  string `json:"ip"`
+	IP6 string `json:"ip6"`
+	MAC string `json:"mac"`
 }
 
 // netIfaceRaw 对应 ubus network.interface dump 响应中单个逻辑接口（实测结构见 UBUS访问指南.md §5.1）。
@@ -274,6 +325,7 @@ type netIfaceRaw struct {
 	} `json:"route"`
 	DNSServer []string       `json:"dns-server"`
 	Data      map[string]any `json:"data"`
+	Neighbors []netNeighbor  `json:"neighbors"`
 }
 
 // fetchNetIfaces 调用 ubus network.interface dump 拉取逻辑接口状态（lan/wan/loopback 等）。
@@ -316,6 +368,7 @@ func fetchNetIfaces(ctx context.Context, a *App, sessionID string) ([]netIfaceRo
 			}
 		}
 		row.Extra = strings.Join(extras, " ")
+		row.neighbors = itf.Neighbors
 		rows = append(rows, row)
 	}
 	return rows, nil

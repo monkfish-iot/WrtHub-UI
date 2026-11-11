@@ -5,43 +5,27 @@
 
 <div class="card shadow-sm mb-2">
     <div class="card-body py-2">
-        <form method="get" action="/operation-logs" class="row g-2 align-items-end">
-            <div class="col-auto">
-                <label class="form-label mb-0 small text-muted">模块</label>
-                <input type="text" name="module" value="{{.Filters.Module}}" class="form-control form-control-sm" placeholder="devices" style="width:110px;">
-            </div>
-            <div class="col-auto">
-                <label class="form-label mb-0 small text-muted">动作</label>
-                <input type="text" name="action" value="{{.Filters.Action}}" class="form-control form-control-sm" placeholder="reboot" style="width:130px;">
-            </div>
-            <div class="col-auto">
-                <label class="form-label mb-0 small text-muted">操作人</label>
-                <input type="text" name="operator" value="{{.Filters.Operator}}" class="form-control form-control-sm" placeholder="用户名" style="width:120px;">
-            </div>
-            <div class="col-auto">
-                <label class="form-label mb-0 small text-muted">对象ID</label>
-                <input type="text" name="target_id" value="{{.Filters.TargetID}}" class="form-control form-control-sm" placeholder="设备ID" style="width:150px;">
-            </div>
-            <div class="col-auto">
-                <label class="form-label mb-0 small text-muted">结果</label>
-                <select name="result" class="form-select form-select-sm" style="width:100px;">
-                    <option value="" {{if eq .Filters.Result ""}}selected{{end}}>全部</option>
-                    <option value="success" {{if eq .Filters.Result "success"}}selected{{end}}>成功</option>
-                    <option value="fail" {{if eq .Filters.Result "fail"}}selected{{end}}>失败</option>
-                </select>
-            </div>
-            <div class="col-auto">
-                <label class="form-label mb-0 small text-muted">起始日期</label>
-                <input type="date" name="time_from" value="{{.Filters.TimeFrom}}" class="form-control form-control-sm" style="width:140px;">
-            </div>
-            <div class="col-auto">
-                <label class="form-label mb-0 small text-muted">结束日期</label>
-                <input type="date" name="time_to" value="{{.Filters.TimeTo}}" class="form-control form-control-sm" style="width:140px;">
-            </div>
-            <div class="col-auto">
-                <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-search"></i> 查询</button>
-                <a href="/operation-logs" class="btn btn-sm btn-outline-secondary">重置</a>
-            </div>
+        <form method="get" action="/operation-logs" class="d-flex flex-wrap align-items-center gap-2">
+            <label class="form-label mb-0 small text-muted text-nowrap" for="aMod">模块</label>
+            <input id="aMod" type="text" name="module" value="{{.Filters.Module}}" class="form-control form-control-sm" placeholder="devices" style="width:110px;">
+            <label class="form-label mb-0 small text-muted text-nowrap" for="aAct">动作</label>
+            <input id="aAct" type="text" name="action" value="{{.Filters.Action}}" class="form-control form-control-sm" placeholder="reboot" style="width:130px;">
+            <label class="form-label mb-0 small text-muted text-nowrap" for="aOp">操作人</label>
+            <input id="aOp" type="text" name="operator" value="{{.Filters.Operator}}" class="form-control form-control-sm" placeholder="用户名" style="width:120px;">
+            <label class="form-label mb-0 small text-muted text-nowrap" for="aTid">对象ID</label>
+            <input id="aTid" type="text" name="target_id" value="{{.Filters.TargetID}}" class="form-control form-control-sm" placeholder="设备ID" style="width:150px;">
+            <label class="form-label mb-0 small text-muted text-nowrap" for="aRes">结果</label>
+            <select id="aRes" name="result" class="form-select form-select-sm" style="width:100px;">
+                <option value="" {{if eq .Filters.Result ""}}selected{{end}}>全部</option>
+                <option value="success" {{if eq .Filters.Result "success"}}selected{{end}}>成功</option>
+                <option value="fail" {{if eq .Filters.Result "fail"}}selected{{end}}>失败</option>
+            </select>
+            <label class="form-label mb-0 small text-muted text-nowrap" for="aFrom">起始日期</label>
+            <input id="aFrom" type="date" name="time_from" value="{{.Filters.TimeFrom}}" class="form-control form-control-sm" style="width:140px;">
+            <label class="form-label mb-0 small text-muted text-nowrap" for="aTo">结束日期</label>
+            <input id="aTo" type="date" name="time_to" value="{{.Filters.TimeTo}}" class="form-control form-control-sm" style="width:140px;">
+            <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-search"></i> 查询</button>
+            <a href="/operation-logs" class="btn btn-sm btn-outline-secondary">重置</a>
         </form>
     </div>
 </div>

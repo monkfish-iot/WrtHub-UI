@@ -1,0 +1,294 @@
+{{define "content"}}
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <h5 class="mb-0"><i class="fas fa-gauge-high me-1"></i> 概况</h5>
+    <div class="d-flex align-items-center gap-2">
+        <span class="small text-muted"><i class="fas fa-clock me-1"></i>更新于 {{tFmt .UpdatedAt}}</span>
+        <a href="/overview" class="btn btn-outline-secondary btn-sm"><i class="fas fa-rotate me-1"></i> 刷新</a>
+    </div>
+</div>
+
+{{if .DevicesErr}}<div class="alert alert-warning py-2 small"><i class="fas fa-triangle-exclamation me-1"></i>设备统计获取失败：{{.DevicesErr}}</div>{{end}}
+
+<div class="row g-2 mb-2">
+    <div class="col-6 col-lg-3">
+        <div class="card shadow-sm border-0 border-start border-4 border-primary h-100">
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="small text-muted">设备总数</div>
+                        <div class="fs-3 fw-semibold">{{.DeviceTotal}}</div>
+                    </div>
+                    <i class="fas fa-server fa-2x text-primary opacity-50"></i>
+                </div>
+                <div class="small">
+                    <span class="badge bg-success">在线 {{.DeviceOnline}}</span>
+                    <span class="badge bg-secondary">离线 {{.DeviceOffline}}</span>
+                    <span class="badge bg-warning text-dark">待定 {{.DevicePending}}</span>
+                </div>
+            </div>
+            <div class="card-footer bg-white py-1 small">
+                <a href="/devices" class="text-decoration-none">查看设备列表 <i class="fas fa-arrow-right"></i></a>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card shadow-sm border-0 border-start border-4 border-info h-100">
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="small text-muted">在线会话</div>
+                        <div class="fs-3 fw-semibold">{{.SessionTotal}}</div>
+                    </div>
+                    <i class="fas fa-users fa-2x text-info opacity-50"></i>
+                </div>
+                <div class="small text-muted">RADIUS 实时记账会话{{if .SessionsErr}}<span class="text-danger">（获取失败）</span>{{end}}</div>
+            </div>
+            <div class="card-footer bg-white py-1 small">
+                <a href="/sessions" class="text-decoration-none">查看在线会话 <i class="fas fa-arrow-right"></i></a>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card shadow-sm border-0 border-start border-4 border-success h-100">
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="small text-muted">本地认证用户</div>
+                        <div class="fs-3 fw-semibold">{{.LocalUserTotal}}</div>
+                    </div>
+                    <i class="fas fa-user-check fa-2x text-success opacity-50"></i>
+                </div>
+                <div class="small">
+                    <span class="badge bg-success">启用 {{.LocalUserActive}}</span>
+                    <span class="badge bg-secondary">禁用 {{.LocalUserDisabled}}</span>
+                </div>
+            </div>
+            <div class="card-footer bg-white py-1 small">
+                <a href="/auth-source" class="text-decoration-none">前往认证源管理 <i class="fas fa-arrow-right"></i></a>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card shadow-sm border-0 border-start border-4 border-warning h-100">
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="small text-muted">今日 PORTAL 认证</div>
+                        <div class="fs-3 fw-semibold">{{.AuthToday}}</div>
+                    </div>
+                    <i class="fas fa-shield-halved fa-2x text-warning opacity-50"></i>
+                </div>
+                <div class="small">
+                    <span class="badge bg-success">成功 {{.AuthTodaySuccess}}</span>
+                    <span class="badge bg-danger">失败 {{.AuthTodayFail}}</span>
+                </div>
+            </div>
+            <div class="card-footer bg-white py-1 small">
+                <a href="/portal/auth-logs" class="text-decoration-none">查看认证日志 <i class="fas fa-arrow-right"></i></a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-2">
+    <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+        <span class="small fw-semibold"><i class="fas fa-heart-pulse me-1"></i> 服务运行状态</span>
+        <span class="small text-muted">点击右上角刷新可更新</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width:140px;">服务</th>
+                        <th style="width:80px;">状态</th>
+                        <th style="width:70px;">版本</th>
+                        <th style="width:110px;">运行时长</th>
+                        <th style="width:90px;">内存</th>
+                        <th style="width:140px;">端口</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {{range .Services}}
+                    <tr>
+                        <td>
+                            <span class="fw-semibold">{{.Name}}</span>
+                            {{if .Error}}<div class="small text-danger">{{.Error}}</div>{{end}}
+                        </td>
+                        <td>
+                            {{if .OK}}<span class="badge bg-success">{{.StatusText}}</span>
+                            {{else}}<span class="badge bg-danger">{{.StatusText}}</span>{{end}}
+                        </td>
+                        <td>{{.Version}}</td>
+                        <td>{{.Uptime}}</td>
+                        <td>{{.Memory}}</td>
+                        <td class="small text-muted">{{.Ports}}</td>
+                        <td class="small">{{.Detail}}</td>
+                    </tr>
+                {{else}}
+                    <tr><td colspan="7" class="text-center text-muted py-3">暂无服务信息</td></tr>
+                {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="row g-2 mb-2">
+    <div class="col-lg-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white py-2">
+                <span class="small fw-semibold"><i class="fas fa-chart-simple me-1"></i> 设备在线状态分布</span>
+            </div>
+            <div class="card-body py-2">
+                {{if .DeviceTotal}}
+                <div class="progress mb-2" style="height:16px;">
+                    <div class="progress-bar bg-success" role="progressbar" style="width: {{.DeviceOnlinePct}}%;" title="在线 {{.DeviceOnline}}">{{if .DeviceOnlinePct}}{{.DeviceOnlinePct}}%{{end}}</div>
+                    <div class="progress-bar bg-secondary" role="progressbar" style="width: {{.DeviceOfflinePct}}%;" title="离线 {{.DeviceOffline}}">{{if .DeviceOfflinePct}}{{.DeviceOfflinePct}}%{{end}}</div>
+                    <div class="progress-bar bg-warning" role="progressbar" style="width: {{.DevicePendingPct}}%;" title="待定 {{.DevicePending}}">{{if .DevicePendingPct}}{{.DevicePendingPct}}%{{end}}</div>
+                </div>
+                <div class="d-flex flex-wrap gap-3 small">
+                    <span><i class="fas fa-square text-success me-1"></i>在线 <strong>{{.DeviceOnline}}</strong>（{{.DeviceOnlinePct}}%）</span>
+                    <span><i class="fas fa-square text-secondary me-1"></i>离线 <strong>{{.DeviceOffline}}</strong>（{{.DeviceOfflinePct}}%）</span>
+                    <span><i class="fas fa-square text-warning me-1"></i>待定 <strong>{{.DevicePending}}</strong>（{{.DevicePendingPct}}%）</span>
+                </div>
+                {{else}}
+                <div class="text-center text-muted small py-3">暂无设备数据</div>
+                {{end}}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+                <span class="small fw-semibold"><i class="fas fa-signal me-1"></i> 认证服务状态</span>
+                <a href="/auth-source" class="small text-decoration-none">配置 <i class="fas fa-arrow-right"></i></a>
+            </div>
+            <div class="card-body py-2">
+                {{if .RadErr}}<div class="alert alert-warning py-1 small mb-2">获取 RADIUS 配置失败：{{.RadErr}}</div>{{end}}
+                {{if .RadCfg}}
+                <table class="table table-sm mb-0 small">
+                    <tbody>
+                        <tr>
+                            <th class="ps-0" style="width:9em;">RADIUS 服务</th>
+                            <td>
+                                {{if .Runtime.Available}}
+                                    {{if .Runtime.Running}}<span class="badge bg-success">运行中</span>{{else}}<span class="badge bg-danger">未运行</span>{{end}}
+                                {{else}}
+                                    <span class="badge bg-secondary">运行时未接入</span>
+                                {{end}}
+                            </td>
+                        </tr>
+                        <tr>
+                            <th class="ps-0">认证端口</th>
+                            <td>
+                                {{if .Runtime.AuthEnabled}}<span class="badge bg-success">启用</span>{{else}}<span class="badge bg-secondary">停用</span>{{end}}
+                                <span class="ms-2 text-muted">{{if .Runtime.AuthAddr}}{{.Runtime.AuthAddr}}{{else}}-{{end}}</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th class="ps-0">记账端口</th>
+                            <td>
+                                {{if .Runtime.AcctEnabled}}<span class="badge bg-success">启用</span>{{else}}<span class="badge bg-secondary">停用</span>{{end}}
+                                <span class="ms-2 text-muted">{{if .Runtime.AcctAddr}}{{.Runtime.AcctAddr}}{{else}}-{{end}}</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th class="ps-0">北向认证源</th>
+                            <td>
+                                {{if eq .RadCfg.AuthSource "device"}}设备凭证（devices 表）
+                                {{else if eq .RadCfg.AuthSource "local"}}本地 RADIUS 用户
+                                {{else if eq .RadCfg.AuthSource "radius"}}转发上游 RADIUS
+                                {{else if eq .RadCfg.AuthSource "ldap"}}转发 LDAP / AD
+                                {{else if eq .RadCfg.AuthSource "http"}}转发 HTTP(S) 认证
+                                {{else}}{{.RadCfg.AuthSource}}{{end}}
+                            </td>
+                        </tr>
+                        <tr>
+                            <th class="ps-0">会话超时</th>
+                            <td>{{.RadCfg.AcctSessionTimeout}} 秒{{if eq .RadCfg.AuthSource "radius"}}{{if .RadCfg.UpstreamStopOnTimeout}}（超时向上游补发 Stop）{{end}}{{end}}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                {{else}}
+                <div class="text-center text-muted small py-3">暂无认证服务数据</div>
+                {{end}}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-2">
+    <div class="col-lg-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+                <span class="small fw-semibold"><i class="fas fa-clipboard-list me-1"></i> 最近操作日志</span>
+                <a href="/operation-logs" class="small text-decoration-none">全部 <i class="fas fa-arrow-right"></i></a>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr><th style="width:130px;">时间</th><th>操作人</th><th>操作</th><th style="width:70px;">结果</th></tr>
+                        </thead>
+                        <tbody>
+                        {{range .RecentOps}}
+                            <tr>
+                                <td class="text-nowrap">{{tFmt .CreatedAt}}</td>
+                                <td>{{if .Username}}{{.Username}}{{else}}<span class="text-muted">-</span>{{end}}</td>
+                                <td class="small">
+                                    <span class="badge bg-secondary-subtle text-secondary-emphasis">{{.Module}}</span>
+                                    <code>{{.Action}}</code>
+                                    {{if .TargetID}}<span class="text-muted">{{.TargetID}}</span>{{end}}
+                                </td>
+                                <td>{{if eq .Result "success"}}<span class="badge bg-success">成功</span>{{else}}<span class="badge bg-danger">失败</span>{{end}}</td>
+                            </tr>
+                        {{else}}
+                            <tr><td colspan="4" class="text-center text-muted py-3">暂无操作日志</td></tr>
+                        {{end}}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+                <span class="small fw-semibold"><i class="fas fa-file-lines me-1"></i> 最近 PORTAL 认证</span>
+                <a href="/portal/auth-logs" class="small text-decoration-none">全部 <i class="fas fa-arrow-right"></i></a>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr><th style="width:130px;">时间</th><th>用户</th><th>来源</th><th style="width:70px;">状态</th></tr>
+                        </thead>
+                        <tbody>
+                        {{range .RecentAuths}}
+                            <tr>
+                                <td class="text-nowrap">{{tFmt .RequestTime}}</td>
+                                <td>{{if .Username}}{{.Username}}{{else}}<span class="text-muted">-</span>{{end}}</td>
+                                <td class="small text-nowrap">
+                                    {{if .UserIP}}{{.UserIP}}{{else}}-{{end}}
+                                    {{if .Mac}}<span class="text-muted">{{.Mac}}</span>{{end}}
+                                </td>
+                                <td>
+                                    {{if eq .Status "success"}}<span class="badge bg-success">成功</span>
+                                    {{else if eq .Status "failed"}}<span class="badge bg-danger">失败</span>
+                                    {{else if eq .Status "forwarding"}}<span class="badge bg-info text-dark">转发中</span>
+                                    {{else}}<span class="badge bg-secondary">{{.Status}}</span>{{end}}
+                                </td>
+                            </tr>
+                        {{else}}
+                            <tr><td colspan="4" class="text-center text-muted py-3">暂无认证日志</td></tr>
+                        {{end}}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}

@@ -55,7 +55,7 @@ func oplogMiddleware(app *App) gin.HandlerFunc {
 
 		c.Next()
 
-		rec := buildOpLog(c, uid, uname, method, bodySnap, rw, time.Since(start))
+		rec := buildOpLog(c, uid, uname, method, bodySnap, form, rw, time.Since(start))
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := store.RecordOpLog(app.DB.WithContext(ctx), rec); err != nil {
@@ -69,13 +69,23 @@ func isWriteMethod(m string) bool {
 }
 
 // buildOpLog 组装一条操作日志（身份/分类/结果）。
-func buildOpLog(c *gin.Context, uid uint, uname, method string, bodySnap []byte, rw *oplogRespWriter, elapsed time.Duration) *store.AuditLog {
+func buildOpLog(c *gin.Context, uid uint, uname, method string, bodySnap []byte, form map[string]any, rw *oplogRespWriter, elapsed time.Duration) *store.AuditLog {
 	status := rw.Status()
 	path := c.Request.URL.Path
 	module, action, targetType := classifyOp(method, path)
 	targetID := c.Param("id")
 	if targetID == "" {
 		targetID = c.Param("device_id")
+	}
+	if targetID == "" {
+		// 证书管理写入：/certificates/api/purposes/{purpose}...
+		targetID = c.Param("purpose")
+	}
+	// 无路径参数的写操作（如 /devices/delete）从表单取目标设备，保证可追溯。
+	if targetID == "" && form != nil {
+		if s, ok := form["device_id"].(string); ok {
+			targetID = s
+		}
 	}
 
 	rec := &store.AuditLog{
@@ -131,6 +141,8 @@ func classifyOp(method, path string) (module, action, targetType string) {
 		return "auth", "login", "user"
 	case "/logout":
 		return "auth", "logout", "user"
+	case "/settings":
+		return "system", "settings_save", "settings"
 	}
 
 	seg := strings.Split(strings.TrimPrefix(path, "/"), "/")
@@ -140,10 +152,26 @@ func classifyOp(method, path string) (module, action, targetType string) {
 	module = seg[0]
 	targetType = module
 
+	if module == "settings" && len(seg) >= 3 && seg[1] == "firmware" {
+		targetType = "firmware"
+		switch seg[2] {
+		case "upload":
+			return "firmware", "upload", targetType
+		case "notes":
+			return "firmware", "notes_save", targetType
+		case "delete":
+			return "firmware", "delete", targetType
+		}
+	}
+
 	if module == "devices" {
 		targetType = "device"
 		if method == http.MethodPost {
 			switch {
+			case len(seg) == 2 && seg[1] == "delete":
+				return module, "delete", targetType
+			case len(seg) == 2 && seg[1] == "pre-register":
+				return module, "pre_register", targetType
 			case len(seg) == 4 && seg[2] == "config" && seg[3] == "reboot":
 				return module, "reboot", targetType
 			case len(seg) == 5 && seg[2] == "config" && seg[3] == "clients" && seg[4] == "kick":
@@ -161,6 +189,37 @@ func classifyOp(method, path string) (module, action, targetType string) {
 		if method == http.MethodDelete && len(seg) == 5 && seg[2] == "config" && seg[3] == "wireless" && seg[4] == "ssid" {
 			return module, "ssid_delete", targetType
 		}
+	}
+
+	if module == "certificates" {
+		targetType = "certificate"
+		if len(seg) >= 3 && seg[1] == "api" {
+			if seg[2] == "backups" {
+				targetType = "certificate_backup"
+				if len(seg) >= 5 && seg[4] == "restore" {
+					return module, "restore", targetType
+				}
+				if method == http.MethodDelete {
+					return module, "delete", targetType
+				}
+				return module, strings.ToLower(method), targetType
+			}
+			if seg[2] == "previous-ca" {
+				return module, "clear_previous_ca", targetType
+			}
+			if len(seg) >= 4 && seg[2] == "purposes" {
+				if len(seg) >= 5 {
+					return module, seg[4], targetType // validate/generate/apply/rollback
+				}
+				switch method {
+				case http.MethodPut:
+					return module, "save", targetType
+				case http.MethodDelete:
+					return module, "delete", targetType
+				}
+			}
+		}
+		return module, strings.ToLower(method), targetType
 	}
 
 	// 通用动作推导
@@ -187,8 +246,11 @@ func captureBody(c *gin.Context) ([]byte, map[string]any) {
 		return []byte(`{"_note":"multipart 请求体不记录"}`), nil
 	}
 
-	raw, err := io.ReadAll(io.LimitReader(c.Request.Body, oplogBodyLimit+1))
-	c.Request.Body = io.NopCloser(bytes.NewReader(raw)) // 回填，handler 正常读取
+	limited := io.LimitReader(c.Request.Body, oplogBodyLimit+1)
+	raw, err := io.ReadAll(limited)
+	// 回填：已读取片段 + 尚未读取的剩余流。不能只回填前 32KB，
+	// 否则证书 PEM 等大请求体会被截断，导致下游 JSON 解析失败。
+	c.Request.Body = io.NopCloser(io.MultiReader(bytes.NewReader(raw), c.Request.Body))
 	if err != nil {
 		return []byte(`{"_note":"请求体读取失败"}`), nil
 	}

@@ -19,6 +19,12 @@
         .toolbar-compact { background-color: #fff; padding: 0.6rem 1rem; border-bottom: 1px solid #e9ecef; }
         .btn-sm { padding: 0.25rem 0.7rem; font-size: 0.75rem; }
         .form-control-sm, .form-select-sm { font-size: 0.75rem; }
+        /* 表单控件：浅灰底 + 深灰描边，与白色卡片背景明显区分 */
+        .form-control, .form-select { border-color: #6c7a8c; background-color: #f1f3f6; border-width: 1px; }
+        .form-control:hover, .form-select:hover { border-color: #4a5568; background-color: #eef1f5; }
+        .form-control:focus, .form-select:focus { border-color: #4d8ffd; background-color: #fff; box-shadow: 0 0 0 0.15rem rgba(13,110,253,0.18); }
+        .form-control:disabled, .form-control[readonly], .form-select:disabled { background-color: #e9ecef; border-color: #9faab8; }
+        .form-check-input { border-color: #6c7a8c; background-color: #f1f3f6; }
         @media (max-width: 768px) {
             .sidebar { position: fixed; transform: translateX(-100%); z-index: 1050; transition: transform 0.3s; }
             .sidebar.show { transform: translateX(0); }
@@ -47,6 +53,14 @@
     <div class="d-flex flex-grow-1 overflow-hidden">
         <div class="sidebar flex-shrink-0" style="width:220px;" id="sidebar">
             <div class="pt-3 pb-2 px-2">
+                <ul class="nav nav-pills flex-column mb-2">
+                    <li class="nav-item">
+                        <a href="/overview" class="nav-link {{if eq .ActiveMenu `overview`}}active{{end}}">
+                            <i class="fas fa-gauge-high"></i> 概况
+                        </a>
+                    </li>
+                </ul>
+                <hr class="bg-secondary">
                 <div class="small text-uppercase text-secondary-emphasis px-2 mb-2">
                     <i class="fas fa-network-wired me-1"></i> 设备与网络
                 </div>
@@ -56,14 +70,54 @@
                             <i class="fas fa-server"></i> 设备管理
                         </a>
                     </li>
-                  
+                    <li class="nav-item">
+                        <a href="/auth-source" class="nav-link {{if eq .ActiveMenu `radius`}}active{{end}}">
+                            <i class="fas fa-key"></i> 认证源管理
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/sessions" class="nav-link {{if eq .ActiveMenu `sessions`}}active{{end}}">
+                            <i class="fas fa-users"></i> 在线会话
+                        </a>
+                    </li>
+
+                </ul>
+                <hr class="bg-secondary">
+                <div class="small text-uppercase text-secondary-emphasis px-2 mb-2">
+                    <i class="fas fa-wifi me-1"></i> PORTAL 认证
+                </div>
+                <ul class="nav nav-pills flex-column">
+                    <li class="nav-item">
+                        <a href="/portal/templates" class="nav-link {{if eq .ActiveMenu `portal_templates`}}active{{end}}">
+                            <i class="fas fa-file-code"></i> 认证模板
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/portal/policies" class="nav-link {{if eq .ActiveMenu `portal_policies`}}active{{end}}">
+                            <i class="fas fa-shield-halved"></i> 认证策略
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/portal/auth-logs" class="nav-link {{if eq .ActiveMenu `portal_auth_logs`}}active{{end}}">
+                            <i class="fas fa-file-lines"></i> 认证日志
+                        </a>
+                    </li>
                 </ul>
                 <hr class="bg-secondary">
                 <div class="small text-uppercase text-secondary-emphasis px-2 mb-2">
                     <i class="fas fa-cogs me-1"></i> 系统
                 </div>
                 <ul class="nav nav-pills flex-column">
-                    
+                    <li class="nav-item">
+                        <a href="/settings" class="nav-link {{if eq .ActiveMenu `settings`}}active{{end}}">
+                            <i class="fas fa-sliders"></i> 系统设置
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/users" class="nav-link {{if eq .ActiveMenu `users`}}active{{end}}">
+                            <i class="fas fa-user-gear"></i> 本地账号
+                        </a>
+                    </li>
                     <li class="nav-item">
                         <a href="/operation-logs" class="nav-link {{if eq .ActiveMenu `oplogs`}}active{{end}}">
                             <i class="fas fa-clipboard-list"></i> 操作日志

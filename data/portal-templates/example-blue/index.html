@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>WiFi 认证上网</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <main class="portal">
+    <div class="card">
+      <div class="badge" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+          <path d="M8.53 15.94a6 6 0 0 1 6.95 0"/>
+          <circle cx="12" cy="19" r="1.2" fill="currentColor" stroke="none"/>
+        </svg>
+      </div>
+      <h1 id="pTopic">欢迎连接访客 WiFi</h1>
+      <p class="sub" id="pSub">完成认证即可免费上网</p>
+      <p class="msg" id="pMsg" role="alert" hidden></p>
+      <form id="loginForm" novalidate>
+        <label class="field">
+          <span>手机号</span>
+          <input type="tel" id="username" name="username" placeholder="请输入手机号" maxlength="11" autocomplete="tel" required>
+        </label>
+        <label class="field">
+          <span>上网密码</span>
+          <input type="password" id="userpasswd" name="userpasswd" placeholder="可从服务台获取" autocomplete="current-password" required>
+        </label>
+        <button type="submit" id="pBtn">立即上网</button>
+      </form>
+      <p class="foot" id="pFoot">连接即表示同意《上网服务条款》 · 示例模板</p>
+    </div>
+  </main>
+  <script>
+  // WrtHub 可视化编辑配置约定：URL query 存在时优先（编辑中实时预览），
+  // 否则读服务端注入的 window.PORTAL_CONFIG（已保存配置）。
+  (function () {
+    var cfg = window.PORTAL_CONFIG || {};
+    var q = new URLSearchParams(location.search), has = false;
+    q.forEach(function (v, k) { if (k !== 't') { cfg[k] = v; has = true; } });
+    function text(id, v) { if (v) { var el = document.getElementById(id); if (el) el.textContent = v; } }
+    if (cfg.page_title) document.title = cfg.page_title;
+    text('pTopic', cfg.topic);
+    text('pSub', cfg.subtitle);
+    text('pBtn', cfg.button_text);
+    text('pFoot', cfg.footer);
+    if (cfg.bg_image) {
+      document.body.style.background = 'center/cover no-repeat url("' + cfg.bg_image + '")';
+    } else if (cfg.bg_color) {
+      document.body.style.background = cfg.bg_color;
+    }
+    if (cfg.btn_color) {
+      var btn = document.getElementById('pBtn');
+      if (btn) btn.style.background = cfg.btn_color;
+    }
+  })();
+  </script>
+  <script>
+  // 认证流程约定（与 webauthd 本地模板一致）：
+  // 1. JS 拦截表单提交，原始 query 参数 + username/userpasswd 作为 body POST 到 /v1/login；
+  //    /v1/login 由 AP nginx 截流转本地 webauthd，请求不到云端。
+  // 2. 响应 JSON 的 error_code == 0 表示认证成功，跳转模板内 success.html
+  //    （相对路径，经 <base href="/p/{code}/"> 解析，云 nginx 直出静态文件）；
+  //    失败时在页面内展示错误文案。
+  (function () {
+    var form = document.getElementById('loginForm');
+    var btn = document.getElementById('pBtn');
+    var msg = document.getElementById('pMsg');
+
+    var ERR_TEXT = {
+      '-101': '没有发现用户',
+      '-102': '用户已经认证成功',
+      '-103': '认证超时',
+      '-104': '正在认证...',
+      '-105': '用户正在下线',
+      '-108': 'RADIUS 认证错误',
+      '-112': '用户名为空或错误',
+      '-113': '用户名或密码错误',
+      '-116': '未知的用户状态',
+      '-202': '用户名或密码错误'
+    };
+
+    function showMsg(text) {
+      msg.textContent = text || '';
+      msg.hidden = !text;
+    }
+
+    function setBusy(busy) {
+      btn.disabled = busy;
+      btn.style.opacity = busy ? '.6' : '';
+    }
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var username = document.getElementById('username').value.trim();
+      var userpasswd = document.getElementById('userpasswd').value;
+      if (!username) { showMsg('请输入手机号'); return; }
+      if (!userpasswd) { showMsg('请输入上网密码'); return; }
+
+      // 透传 AP 302 下发的全部原始参数（wlanuserip/wlanusermac/wlanacip/...），
+      // 仅剔除模板预览参数 t，避免污染认证请求。
+      var body = new URLSearchParams(location.search);
+      body.delete('t');
+      body.set('username', username);
+      body.set('userpasswd', userpasswd);
+
+      showMsg('');
+      setBusy(true);
+
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', '/v1/login', true);
+      xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+      xhr.timeout = 10000;
+      xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) { return; }
+        setBusy(false);
+        var res;
+        try {
+          res = JSON.parse(xhr.responseText || 'null');
+        } catch (err) {
+          res = null;
+        }
+        if (!res) {
+          showMsg(xhr.status === 0 ? '网络错误，请检查网络连接' : '服务器响应格式错误');
+          return;
+        }
+        if (res.error_code === 0) {
+          showMsg('认证成功');
+          // 成功页携带会话信息（速率/配额/在线时长），跳模板内 success.html。
+          var q = res.body ? new URLSearchParams(res.body).toString() : '';
+          location.href = 'success.html' + (q ? '?' + q : '');
+          return;
+        }
+        showMsg(ERR_TEXT[String(res.error_code)] || res.msg || ('系统错误，请联系管理员，错误码: ' + res.error_code));
+      };
+      xhr.ontimeout = function () { setBusy(false); showMsg('请求超时，请稍后重试'); };
+      xhr.onerror = function () { setBusy(false); showMsg('网络错误，请检查网络连接'); };
+      xhr.send(body.toString());
+    });
+  })();
+  </script>
+</body>
+</html>

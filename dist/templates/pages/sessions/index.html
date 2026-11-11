@@ -1,0 +1,278 @@
+{{define "content"}}
+<div class="card shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center bg-white py-2">
+        <span class="small fw-semibold"><i class="fas fa-users me-1"></i> 实时记账会话
+            <span class="badge bg-secondary" id="sessTotal">{{.Total}}</span>
+        </span>
+        <span class="small text-muted" id="sessRefresh">每 5 秒自动刷新</span>
+    </div>
+    {{if .FlashOK}}<div class="alert alert-success py-2 small m-2 mb-0">{{.FlashOK}}</div>{{end}}
+    {{if .FlashErr}}<div class="alert alert-danger py-2 small m-2 mb-0">{{.FlashErr}}</div>{{end}}
+    {{if .Err}}<div class="alert alert-warning py-2 small m-2 mb-0">{{.Err}}</div>{{end}}
+    <div class="card-body p-0">
+        <div class="table-responsive" style="max-height:calc(100vh - 210px);overflow-y:auto;">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light sticky-top">
+                    <tr>
+                        <th>用户名</th>
+                        <th>NAS 标识</th>
+                        <th>客户端 MAC</th>
+                        <th>IP</th>
+                        <th class="text-end">上行</th>
+                        <th class="text-end">下行</th>
+                        <th class="text-end">在线时长</th>
+                        <th>开始时间</th>
+                        <th>最近更新</th>
+                        <th class="text-end">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="sessBody">
+                {{range .Sessions}}
+                    <tr>
+                        <td>{{.Username}}</td>
+                        <td>{{.NasIdentifier}}</td>
+                        <td>{{.CallingStationID}}</td>
+                        <td>{{.FramedIPAddress}}</td>
+                        <td class="text-end">{{fsize .AcctInputOctets}}</td>
+                        <td class="text-end">{{fsize .AcctOutputOctets}}</td>
+                        <td class="text-end">{{durSince .AcctStartTime}}</td>
+                        <td>{{tFmt .AcctStartTime}}</td>
+                        <td>{{tFmt .AcctUpdateTime}}</td>
+                        <td class="text-end text-nowrap">
+                            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 btn-sess-detail"
+                                data-username="{{.Username}}" data-nas="{{.NasIdentifier}}"
+                                data-acct-sid="{{.AcctSessionID}}" data-mac="{{.CallingStationID}}"
+                                data-ip="{{.FramedIPAddress}}"
+                                data-in="{{fsize .AcctInputOctets}}" data-out="{{fsize .AcctOutputOctets}}"
+                                data-dur="{{durSince .AcctStartTime}}"
+                                data-start="{{tFmt .AcctStartTime}}" data-update="{{tFmt .AcctUpdateTime}}"
+                                title="详情"><i class="fas fa-eye"></i></button>
+                            <form method="post" action="/sessions/drop" class="d-inline"
+                                onsubmit="return confirm('确认强制下线用户 {{.Username}}（{{.FramedIPAddress}}）？');">
+                                <input type="hidden" name="nas" value="{{.NasIdentifier}}">
+                                <input type="hidden" name="acct_sid" value="{{.AcctSessionID}}">
+                                <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-1" title="下线"><i class="fas fa-power-off"></i></button>
+                            </form>
+                        </td>
+                    </tr>
+                {{else}}
+                    <tr><td colspan="10" class="text-center text-muted py-3">暂无活跃会话</td></tr>
+                {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="card-footer bg-white py-2 small text-muted">
+        仅显示 Start 已记录、未 Stop 的会话；超过「会话超时」无 Interim-Update 自动归档（当前 {{.Timeout}} 秒{{if ne .AuthSource "local"}}，认证源 {{.AuthSource}}{{end}}{{if and (eq .AuthSource "radius") .StopOnTimeout}}，超时向上游补发 Stop{{end}}）。
+    </div>
+</div>
+
+<!-- 会话详情弹窗 -->
+<div class="modal fade" id="sessDetailModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="fas fa-eye me-1"></i> 会话详情</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body p-0">
+                <table class="table table-sm mb-0 small">
+                    <tbody>
+                        <tr><th class="ps-3" style="width:9em;">用户名</th><td id="sdUsername"></td></tr>
+                        <tr><th class="ps-3">NAS 标识</th><td id="sdNas"></td></tr>
+                        <tr><th class="ps-3">Session ID</th><td><code id="sdAcctSid"></code></td></tr>
+                        <tr><th class="ps-3">客户端 MAC</th><td id="sdMac"></td></tr>
+                        <tr><th class="ps-3">IP</th><td id="sdIp"></td></tr>
+                        <tr><th class="ps-3">上行</th><td id="sdIn"></td></tr>
+                        <tr><th class="ps-3">下行</th><td id="sdOut"></td></tr>
+                        <tr><th class="ps-3">在线时长</th><td id="sdDur"></td></tr>
+                        <tr><th class="ps-3">开始时间</th><td id="sdStart"></td></tr>
+                        <tr><th class="ps-3">最近更新</th><td id="sdUpdate"></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const body = document.getElementById('sessBody');
+    if (!body) return;
+    const refreshEl = document.getElementById('sessRefresh');
+    const totalEl = document.getElementById('sessTotal');
+    const detailModalEl = document.getElementById('sessDetailModal');
+    let detailModal = null;
+
+    function fmtBytes(n) {
+        n = Number(n) || 0;
+        if (n <= 0) return '-';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        let i = 0;
+        while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+        return n.toFixed(i === 0 ? 0 : (i === 1 ? 1 : 2)) + ' ' + units[i];
+    }
+    function fmtDur(startISO) {
+        if (!startISO) return '-';
+        const t = Date.parse(startISO);
+        if (!isFinite(t)) return '-';
+        const total = Math.max(0, Math.floor((Date.now() - t) / 1000));
+        const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
+        return (h > 0 ? h + ' 小时 ' : '') + (h > 0 || m > 0 ? m + ' 分 ' : '') + s + ' 秒';
+    }
+    function fmtTime(iso) {
+        if (!iso) return '-';
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return '-';
+        const p = v => String(v).padStart(2, '0');
+        return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+            ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    }
+    function td(text, opts) {
+        const c = document.createElement('td');
+        opts = opts || {};
+        if (opts.right) c.className = 'text-end';
+        if (opts.code) {
+            const el = document.createElement('code');
+            el.textContent = text || '';
+            c.appendChild(el);
+        } else {
+            c.textContent = text == null ? '' : String(text);
+        }
+        return c;
+    }
+    function showDetail(d) {
+        document.getElementById('sdUsername').textContent = d.username || '-';
+        document.getElementById('sdNas').textContent = d.nas || '-';
+        document.getElementById('sdAcctSid').textContent = d.acctSid || '-';
+        document.getElementById('sdMac').textContent = d.mac || '-';
+        document.getElementById('sdIp').textContent = d.ip || '-';
+        document.getElementById('sdIn').textContent = d.inBytes || '-';
+        document.getElementById('sdOut').textContent = d.outBytes || '-';
+        document.getElementById('sdDur').textContent = d.dur || '-';
+        document.getElementById('sdStart').textContent = d.start || '-';
+        document.getElementById('sdUpdate').textContent = d.update || '-';
+        if (!detailModal && window.bootstrap) {
+            detailModal = new bootstrap.Modal(detailModalEl);
+        }
+        if (detailModal) detailModal.show();
+    }
+    // 详情按钮（含轮询重绘出的行）：事件委托
+    body.addEventListener('click', function (ev) {
+        const btn = ev.target.closest('.btn-sess-detail');
+        if (!btn) return;
+        showDetail({
+            username: btn.dataset.username,
+            nas: btn.dataset.nas,
+            acctSid: btn.dataset.acctSid,
+            mac: btn.dataset.mac,
+            ip: btn.dataset.ip,
+            inBytes: btn.dataset.in,
+            outBytes: btn.dataset.out,
+            dur: btn.dataset.dur,
+            start: btn.dataset.start,
+            update: btn.dataset.update
+        });
+    });
+    function actionTd(it) {
+        const c = document.createElement('td');
+        c.className = 'text-end text-nowrap';
+
+        const detailBtn = document.createElement('button');
+        detailBtn.type = 'button';
+        detailBtn.className = 'btn btn-outline-secondary btn-sm py-0 px-1 btn-sess-detail';
+        detailBtn.title = '详情';
+        detailBtn.innerHTML = '<i class="fas fa-eye"></i>';
+        detailBtn.dataset.username = it.username || '';
+        detailBtn.dataset.nas = it.nas_identifier || '';
+        detailBtn.dataset.acctSid = it.acct_session_id || '';
+        detailBtn.dataset.mac = it.calling_station_id || '';
+        detailBtn.dataset.ip = it.framed_ip_address || '';
+        detailBtn.dataset.in = fmtBytes(it.acct_input_octets);
+        detailBtn.dataset.out = fmtBytes(it.acct_output_octets);
+        detailBtn.dataset.dur = fmtDur(it.acct_start_time);
+        detailBtn.dataset.start = fmtTime(it.acct_start_time);
+        detailBtn.dataset.update = fmtTime(it.acct_update_time);
+        c.appendChild(detailBtn);
+
+        const form = document.createElement('form');
+        form.method = 'post';
+        form.action = '/sessions/drop';
+        form.className = 'd-inline';
+        form.addEventListener('submit', function () {
+            return confirm('确认强制下线用户 ' + (it.username || '') + '（' + (it.framed_ip_address || '') + '）？');
+        });
+        const nas = document.createElement('input');
+        nas.type = 'hidden'; nas.name = 'nas'; nas.value = it.nas_identifier || '';
+        const sid = document.createElement('input');
+        sid.type = 'hidden'; sid.name = 'acct_sid'; sid.value = it.acct_session_id || '';
+        const dropBtn = document.createElement('button');
+        dropBtn.type = 'submit';
+        dropBtn.className = 'btn btn-outline-danger btn-sm py-0 px-1';
+        dropBtn.title = '下线';
+        dropBtn.innerHTML = '<i class="fas fa-power-off"></i>';
+        form.appendChild(nas);
+        form.appendChild(sid);
+        form.appendChild(dropBtn);
+        c.appendChild(form);
+        return c;
+    }
+    function render(items) {
+        body.replaceChildren();
+        if (!items || !items.length) {
+            const tr = document.createElement('tr');
+            const c = document.createElement('td');
+            c.colSpan = 10;
+            c.className = 'text-center text-muted py-3';
+            c.textContent = '暂无活跃会话';
+            tr.appendChild(c);
+            body.appendChild(tr);
+            return;
+        }
+        items.forEach(it => {
+            const tr = document.createElement('tr');
+            tr.appendChild(td(it.username));
+            tr.appendChild(td(it.nas_identifier));
+            tr.appendChild(td(it.calling_station_id));
+            tr.appendChild(td(it.framed_ip_address));
+            tr.appendChild(td(fmtBytes(it.acct_input_octets), { right: true }));
+            tr.appendChild(td(fmtBytes(it.acct_output_octets), { right: true }));
+            tr.appendChild(td(fmtDur(it.acct_start_time), { right: true }));
+            tr.appendChild(td(fmtTime(it.acct_start_time)));
+            tr.appendChild(td(fmtTime(it.acct_update_time)));
+            tr.appendChild(actionTd(it));
+            body.appendChild(tr);
+        });
+    }
+    let timer = null;
+    async function refreshSessions() {
+        try {
+            const resp = await fetch('/sessions/data?_=' + Date.now(), {
+                credentials: 'same-origin',
+                headers: { 'Accept': 'application/json' }
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const data = await resp.json();
+            render(data.items);
+            if (totalEl) totalEl.textContent = data.total || 0;
+            if (refreshEl) refreshEl.textContent = '更新于 ' + new Date().toLocaleTimeString();
+        } catch (e) {
+            if (refreshEl) refreshEl.textContent = '刷新失败：' + e.message;
+        }
+    }
+    function start() {
+        if (timer) clearInterval(timer);
+        refreshSessions();
+        timer = setInterval(refreshSessions, 5000);
+    }
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) {
+            if (timer) { clearInterval(timer); timer = null; }
+        } else {
+            start();
+        }
+    });
+    start();
+})();
+</script>
+{{end}}

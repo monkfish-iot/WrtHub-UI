@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "pages": [
+    {
+      "id": "login",
+      "name": "认证页",
+      "file": "index.html",
+      "fields": [
+        { "key": "page_title", "label": "页面标题", "type": "text", "default": "连接网络", "maxlength": 64 },
+        { "key": "brand", "label": "品牌名称", "type": "text", "default": "Wind WiFi", "maxlength": 32 },
+        { "key": "tagline", "label": "品牌副标题", "type": "text", "default": "轻盈 · 顺畅 · 安全", "maxlength": 64 },
+        { "key": "pill_text", "label": "顶部徽标文案", "type": "text", "default": "安全连接 · 云端认证", "maxlength": 32 },
+        { "key": "topic", "label": "主标题", "type": "text", "default": "连接网络，即刻上网", "maxlength": 64 },
+        { "key": "subtitle", "label": "副标题", "type": "text", "default": "输入账号信息，即可畅享高速网络", "maxlength": 128 },
+        { "key": "access_title", "label": "接入信息标题", "type": "text", "default": "本次接入信息", "maxlength": 32, "help": "无接入参数时该区块自动隐藏" },
+        { "key": "username_label", "label": "账号标签", "type": "text", "default": "用户名", "maxlength": 32 },
+        { "key": "username_placeholder", "label": "账号输入提示", "type": "text", "default": "请输入用户名", "maxlength": 64 },
+        { "key": "password_label", "label": "密码标签", "type": "text", "default": "密码", "maxlength": 32 },
+        { "key": "password_placeholder", "label": "密码输入提示", "type": "text", "default": "请输入密码", "maxlength": 64 },
+        { "key": "button_text", "label": "按钮文字", "type": "text", "default": "登 录", "maxlength": 32 },
+        { "key": "footer", "label": "页脚文案", "type": "text", "default": "连接即表示同意《上网服务条款》", "maxlength": 128 },
+        { "key": "accent_color", "label": "主题色（渐变起）", "type": "color", "default": "#38bdf8", "help": "影响顶部渐变条、按钮与线条" },
+        { "key": "accent_color_end", "label": "主题色（渐变止）", "type": "color", "default": "#14b8a6" },
+        { "key": "bg_color", "label": "页面背景色", "type": "color", "default": "#eef6ff", "help": "选择后覆盖内置的清风渐变背景" },
+        { "key": "bg_image", "label": "页面背景图", "type": "image", "help": "选择后覆盖背景色（仅使用模板包内图片）" },
+        { "key": "logo_image", "label": "品牌 Logo", "type": "image", "help": "选择后替换左上角图形标（仅使用模板包内图片）" }
+      ]
+    },
+    {
+      "id": "success",
+      "name": "成功页",
+      "file": "success.html",
+      "fields": [
+        { "key": "success_page_title", "label": "页面标题", "type": "text", "default": "登录成功", "maxlength": 64 },
+        { "key": "success_topic", "label": "成功页主标题", "type": "text", "default": "登录成功", "maxlength": 64 },
+        { "key": "success_subtitle", "label": "成功页副标题", "type": "text", "default": "网络已连接，开始畅享清风般的极速体验", "maxlength": 128 },
+        { "key": "success_footer", "label": "成功页页脚", "type": "text", "default": "如遇网络问题，请联系现场工作人员", "maxlength": 128 }
+      ]
+    }
+  ]
+}

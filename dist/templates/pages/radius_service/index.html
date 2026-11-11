@@ -1,0 +1,136 @@
+{{define "content"}}
+{{if .FlashOK}}<div class="alert alert-success alert-dismissible fade show py-2 small">{{.FlashOK}}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{{end}}
+{{if .FlashErr}}<div class="alert alert-danger alert-dismissible fade show py-2 small">{{.FlashErr}}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{{end}}
+{{if .CfgErr}}<div class="alert alert-warning py-2 small"><i class="fas fa-triangle-exclamation me-1"></i>{{.CfgErr}}（请检查 frps_helper 管理接口配置与连通性）</div>{{end}}
+
+{{if .Cfg}}
+<div class="card shadow-sm mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center bg-white py-2">
+        <span class="small fw-semibold"><i class="fas fa-sliders me-1"></i> 全局 RADIUS 配置</span>
+        <span class="small text-muted">
+            {{if .Cfg.Runtime}}
+                {{if index .Cfg.Runtime "running"}}<span class="badge bg-success">服务运行中</span>{{else}}<span class="badge bg-secondary">服务未运行</span>{{end}}
+                <span class="ms-1">认证 {{index .Cfg.Runtime "auth_addr"}} · 记账 {{index .Cfg.Runtime "acct_addr"}}</span>
+            {{end}}
+        </span>
+    </div>
+    <div class="card-body">
+        <form method="post" action="/radius/service" id="radiusServiceForm">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <div class="border rounded p-2 h-100">
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" role="switch" id="auth_enable" name="auth_enable" value="1" {{if .Cfg.AuthEnable}}checked{{end}}>
+                            <label class="form-check-label small fw-semibold" for="auth_enable">认证服务（Access-Request，UDP）</label>
+                        </div>
+                        <div class="row g-2">
+                            <div class="col-12">
+                                <div class="row align-items-center">
+                                    <label class="col-sm-4 col-form-label col-form-label-sm text-muted">监听地址 / 端口</label>
+                                    <div class="col-sm-8 d-flex gap-2">
+                                        <input type="text" class="form-control form-control-sm" name="auth_listen_addr" value="{{.Cfg.AuthListenAddr}}" required placeholder="0.0.0.0" style="flex:1">
+                                        <input type="number" class="form-control form-control-sm" name="auth_listen_port" value="{{.Cfg.AuthListenPort}}" required min="1" max="65535" style="width:90px">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="row align-items-center">
+                                    <label class="col-sm-4 col-form-label col-form-label-sm text-muted">全局认证密钥</label>
+                                    <div class="col-sm-8">
+                                        <input type="text" class="form-control form-control-sm font-monospace" name="auth_secret" value="{{.Cfg.AuthSecret}}" maxlength="128" autocomplete="off">
+                                        <div class="form-text">设备无独立密钥时回退使用；留空则拒绝认证</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="row align-items-center">
+                                    <label class="col-sm-4 col-form-label col-form-label-sm text-muted">认证超时（秒）</label>
+                                    <div class="col-sm-8">
+                                        <input type="number" class="form-control form-control-sm" name="auth_timeout" value="{{.Cfg.AuthTimeout}}" required min="1" max="3600">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="border rounded p-2 h-100">
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" role="switch" id="acct_enable" name="acct_enable" value="1" {{if .Cfg.AcctEnable}}checked{{end}}>
+                            <label class="form-check-label small fw-semibold" for="acct_enable">记账服务（Accounting，UDP，纯会话记录）</label>
+                        </div>
+                        <div class="row g-2">
+                            <div class="col-12">
+                                <div class="row align-items-center">
+                                    <label class="col-sm-4 col-form-label col-form-label-sm text-muted">监听地址 / 端口</label>
+                                    <div class="col-sm-8 d-flex gap-2">
+                                        <input type="text" class="form-control form-control-sm" name="acct_listen_addr" value="{{.Cfg.AcctListenAddr}}" required placeholder="0.0.0.0" style="flex:1">
+                                        <input type="number" class="form-control form-control-sm" name="acct_listen_port" value="{{.Cfg.AcctListenPort}}" required min="1" max="65535" style="width:90px">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="row align-items-center">
+                                    <label class="col-sm-4 col-form-label col-form-label-sm text-muted">全局记账密钥</label>
+                                    <div class="col-sm-8">
+                                        <input type="text" class="form-control form-control-sm font-monospace" name="acct_secret" value="{{.Cfg.AcctSecret}}" maxlength="128" autocomplete="off">
+                                        <div class="form-text">留空回退认证密钥</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="row align-items-center">
+                                    <label class="col-sm-4 col-form-label col-form-label-sm text-muted">记账超时（秒）</label>
+                                    <div class="col-sm-8">
+                                        <input type="number" class="form-control form-control-sm" name="acct_timeout" value="{{.Cfg.AcctTimeout}}" required min="1" max="3600">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="row align-items-center">
+                                    <label class="col-sm-4 col-form-label col-form-label-sm text-muted">会话超时（秒）</label>
+                                    <div class="col-sm-8">
+                                        <input type="number" class="form-control form-control-sm" name="acct_session_timeout" value="{{.Cfg.AcctSessionTimeout}}" required min="1" max="86400">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="row align-items-center">
+                                    <label class="col-sm-4 col-form-label col-form-label-sm text-muted">清理周期（秒）</label>
+                                    <div class="col-sm-8">
+                                        <input type="number" class="form-control form-control-sm" name="acct_cleanup_interval" value="{{.Cfg.AcctCleanupInterval}}" required min="1" max="86400">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="border rounded p-2">
+                        <div class="small fw-semibold mb-2 text-muted"><i class="fas fa-bullhorn me-1"></i> 设备接入宣告参数（设备 join 时写入设备参数；留空/0 回退默认值）</div>
+                        <div class="row align-items-center">
+                            <label class="col-sm-3 col-form-label col-form-label-sm text-muted">宣告服务器地址</label>
+                            <div class="col-sm-9">
+                                <input type="text" class="form-control form-control-sm" name="advertised_server" value="{{.Cfg.AdvertisedServer}}" placeholder="回退 {{.Cfg.EffectiveServer}}">
+                            </div>
+                        </div>
+                        <div class="row align-items-center mt-2">
+                            <label class="col-sm-3 col-form-label col-form-label-sm text-muted">宣告认证 / 记账端口</label>
+                            <div class="col-sm-9 d-flex gap-2">
+                                <input type="number" class="form-control form-control-sm" name="advertised_auth_port" value="{{.Cfg.AdvertisedAuthPort}}" min="0" max="65535" placeholder="认证端口" style="flex:1">
+                                <input type="number" class="form-control form-control-sm" name="advertised_acct_port" value="{{.Cfg.AdvertisedAcctPort}}" min="0" max="65535" placeholder="记账端口" style="flex:1">
+                            </div>
+                        </div>
+                        <div class="small text-muted mt-2">当前生效：{{.Cfg.EffectiveServer}} 认证 {{.Cfg.EffectiveAuthPort}} / 记账 {{.Cfg.EffectiveAcctPort}}</div>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-3">
+                <button class="btn btn-primary btn-sm"><i class="fas fa-save me-1"></i> 保存并生效</button>
+                <span class="small text-muted ms-2">修改监听地址/端口或开关会自动重启 RADIUS 服务；密钥/超时即时热生效。</span>
+            </div>
+        </form>
+    </div>
+</div>
+{{end}}
+{{end}}

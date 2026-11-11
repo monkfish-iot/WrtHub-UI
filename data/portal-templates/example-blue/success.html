@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>认证成功</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <main class="portal">
+    <div class="card">
+      <div class="badge badge-ok" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 6L9 17l-5-5"/>
+        </svg>
+      </div>
+      <h1 id="pTopic">认证成功</h1>
+      <p class="sub" id="pSub">您已接入网络，可以开始上网了</p>
+      <dl class="info" id="pInfo" hidden>
+        <div><dt>IP 地址</dt><dd id="pUserIp">-</dd></div>
+        <div><dt>在线时长</dt><dd id="pSessionTimeout">-</dd></div>
+        <div><dt>剩余流量</dt><dd id="pQuotaData">-</dd></div>
+      </dl>
+      <p class="foot" id="pFoot">连接即表示同意《上网服务条款》 · 示例模板</p>
+    </div>
+  </main>
+  <script>
+  // 成功页：从 URL query 读取 webauthd 返回的会话信息（见本地模板 success.html 约定），
+  // 同时支持 window.PORTAL_CONFIG / query 的可视化定制注入（与登录页一致）。
+  (function () {
+    var cfg = window.PORTAL_CONFIG || {};
+    var q = new URLSearchParams(location.search);
+    q.forEach(function (v, k) { if (k !== 't') { cfg[k] = v; } });
+    function text(id, v) { if (v) { var el = document.getElementById(id); if (el) el.textContent = v; } }
+    if (cfg.page_title) document.title = cfg.page_title;
+    text('pTopic', cfg.success_topic || cfg.topic);
+    text('pSub', cfg.success_subtitle || cfg.subtitle);
+    text('pFoot', cfg.footer);
+    if (cfg.bg_image) {
+      document.body.style.background = 'center/cover no-repeat url("' + cfg.bg_image + '")';
+    } else if (cfg.bg_color) {
+      document.body.style.background = cfg.bg_color;
+    }
+
+    function bytesToSize(bytes) {
+      if (typeof bytes === 'undefined' || bytes === null || bytes === '') { return ''; }
+      var n = Number(bytes);
+      if (!isFinite(n)) { return ''; }
+      if (n === 0) { return '不限流量'; }
+      var k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      var i = Math.floor(Math.log(n) / Math.log(k));
+      return (n / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
+    }
+    function formatTime(sec) {
+      if (typeof sec === 'undefined' || sec === null || sec === '') { return ''; }
+      var n = parseInt(sec, 10);
+      if (!isFinite(n)) { return ''; }
+      if (n === 0) { return '不限时'; }
+      var d = Math.floor(n / 86400), h = Math.floor((n % 86400) / 3600),
+          m = Math.floor((n % 3600) / 60), s = n % 60;
+      return (d ? d + '天' : '') + (h ? h + '小时' : '') + (m ? m + '分' : '') + (s ? s + '秒' : '');
+    }
+
+    var userIp = q.get('User-IP');
+    var timeout = formatTime(q.get('Session-Timeout'));
+    var quota = bytesToSize(q.get('Quota-Data'));
+    if (userIp || timeout || quota) {
+      text('pUserIp', userIp || '-');
+      text('pSessionTimeout', timeout || '-');
+      text('pQuotaData', quota || '-');
+      document.getElementById('pInfo').hidden = false;
+    }
+  })();
+  </script>
+</body>
+</html>

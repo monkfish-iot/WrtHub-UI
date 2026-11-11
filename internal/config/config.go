@@ -28,6 +28,19 @@ type Config struct {
 	Storage    StorageConfig    `yaml:"storage"`
 	Assets     AssetsConfig     `yaml:"assets"`
 	Firmware   FirmwareConfig   `yaml:"firmware"`
+	Portal     PortalConfig     `yaml:"portal"`
+	Services   ServicesConfig   `yaml:"services"`
+}
+
+// ServicesConfig 是被监控的同机服务（概况页运行状态展示用）。
+type ServicesConfig struct {
+	PortalServer PortalServerProbeConfig `yaml:"portal_server"`
+}
+
+// PortalServerProbeConfig 是 portal-server 健康检查地址。
+type PortalServerProbeConfig struct {
+	BaseURL string        `yaml:"base_url"`
+	Timeout time.Duration `yaml:"timeout"`
 }
 
 type AppConfig struct {
@@ -50,6 +63,7 @@ type DeviceRpcConfig struct {
 	Scheme         string        `yaml:"scheme"`
 	DomainSuffix   string        `yaml:"domain_suffix"`
 	Port           int           `yaml:"port"`
+	DirectPort     int           `yaml:"direct_port"` // 直连模式设备 nginx 端口（默认 8765）
 	AuthPath       string        `yaml:"auth_path"`
 	RpcPathPrefix  string        `yaml:"rpc_path_prefix"`
 	UbusPath       string        `yaml:"ubus_path"` // UBUS JSON-RPC 端点路径，默认 /ubus；lucirpc 失败时兜底
@@ -79,6 +93,10 @@ type AssetsConfig struct {
 type FirmwareConfig struct {
 	Root      string `yaml:"root"`        // 固件库根目录（按型号分子目录）
 	MaxSizeMB int64  `yaml:"max_size_mb"` // 单固件文件大小上限（MB）
+}
+
+type PortalConfig struct {
+	TemplateRoot string `yaml:"template_root"` // PORTAL 模板解压根目录（按模板 code 子目录）
 }
 
 // ResolvePath 决定实际使用的配置文件路径，优先级由高到低：
@@ -157,6 +175,9 @@ func (c *Config) applyDefaults() {
 	if c.DeviceRpc.Port == 0 {
 		c.DeviceRpc.Port = 20001
 	}
+	if c.DeviceRpc.DirectPort == 0 {
+		c.DeviceRpc.DirectPort = 8765
+	}
 	if c.DeviceRpc.AuthPath == "" {
 		c.DeviceRpc.AuthPath = "/auth"
 	}
@@ -204,6 +225,15 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Firmware.MaxSizeMB <= 0 {
 		c.Firmware.MaxSizeMB = 512
+	}
+	if c.Portal.TemplateRoot == "" {
+		c.Portal.TemplateRoot = "./data/portal-templates"
+	}
+	if c.Services.PortalServer.BaseURL == "" {
+		c.Services.PortalServer.BaseURL = "http://127.0.0.1:19090"
+	}
+	if c.Services.PortalServer.Timeout == 0 {
+		c.Services.PortalServer.Timeout = 3 * time.Second
 	}
 }
 

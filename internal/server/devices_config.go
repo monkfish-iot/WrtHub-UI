@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"html/template"
@@ -19,7 +20,22 @@ import (
 	"wrthub-ui/internal/auth"
 	"wrthub-ui/internal/firmware"
 	"wrthub-ui/internal/frpsclient"
+	"wrthub-ui/internal/lucirpc"
+	"wrthub-ui/internal/ubusrpc"
 )
+
+// msgDeviceUnreachable 是设备隧道不可达时的统一友好提示：frpc 未连上 frps 时，
+// frps 对任意路径都返回 “powered by frp” 的 404 HTML 页，原实现会把整段 HTML
+// 原文拼进页面（每个 TAB 报一遍）。
+const msgDeviceUnreachable = "设备当前不可达（隧道/直连均未连通，设备可能正在重启或离线），请稍后刷新重试"
+
+// friendlyDeviceErr 把设备不可达错误转为统一友好提示，其余错误保留原文。
+func friendlyDeviceErr(err error) string {
+	if errors.Is(err, lucirpc.ErrUnreachable) {
+		return msgDeviceUnreachable
+	}
+	return err.Error()
+}
 
 // uciField 是 UCI 配置选项的键值对视图。
 type uciField struct {
@@ -568,10 +584,14 @@ func (a *App) handleDeviceConfig(c *gin.Context) {
 	}
 
 	u, _ := auth.CurrentUser(c)
+	host, herr := a.RPC.Host(c.Request.Context(), dev.SessionID)
+	if herr != nil {
+		host = a.Cfg.DeviceHost(dev.SessionID)
+	}
 	pg := deviceConfigPage{
 		pageBase:  pageBase{ActiveMenu: "devices", CurrentUser: u, Config: a.Cfg},
 		Device:    dev,
-		Host:      a.Cfg.DeviceHost(dev.SessionID),
+		Host:      host,
 		Serial:    dev.DeviceID, // 默认降级；在线时用 system.board 序列号覆盖
 		FlashOK:   c.Query("ok"),
 		FlashErr:  c.Query("err"),
@@ -587,77 +607,14 @@ func (a *App) handleDeviceConfig(c *gin.Context) {
 		errs = append(errs, "设备离线，无法获取配置")
 		a.Log.Info("device config: skip ubus for non-online device", "device_id", deviceID, "status", dev.Status)
 	} else {
-		ctx := c.Request.Context()
-		// 概览：system.board + system.info
-		if ov, oerr := fetchOverview(ctx, a, dev.SessionID); oerr != nil {
-			errs = append(errs, "概览: "+oerr.Error())
+		tabs, unreachable := a.loadConfigTabs(c.Request.Context(), dev, &pg, c.Query("scan_if"))
+		if unreachable {
+			// 隧道不可达：统一提示，不再逐 TAB 重复 frp 404 页面原文
+			pg.Error = msgDeviceUnreachable
+			a.Log.Warn("device config: device unreachable, remaining tabs skipped",
+				"device_id", deviceID, "session_id", dev.SessionID)
 		} else {
-			pg.Overview = ov
-			if s := pickStr(ov.Board, "board_id", "serial", "serial_number", "boardname", "board_name"); s != "" {
-				pg.Serial = s
-			}
-		}
-		// network 配置 → LAN/WAN 分组（WAN 不存在 = 桥模式）
-		secs, nerr := fetchUciSections(ctx, a, dev.SessionID, "network")
-		if nerr != nil {
-			errs = append(errs, "网络配置: "+nerr.Error())
-			a.Log.Warn("device config: uci.get network failed",
-				"device_id", deviceID, "session_id", dev.SessionID, "err", nerr)
-		} else {
-			pg.LAN, pg.WAN = splitLanWan(secs)
-		}
-		// 网络接口状态（network.interface dump）
-		if ifs, ierr := fetchNetIfaces(ctx, a, dev.SessionID); ierr != nil {
-			errs = append(errs, "网络接口: "+ierr.Error())
-		} else {
-			pg.NetIfaces = ifs
-			pg.LanIP = lanIPFromIfaces(ifs)
-		}
-		// 主机表（luci-rpc getHostHints）
-		if hosts, herr := fetchHostHints(ctx, a, dev.SessionID); herr != nil {
-			errs = append(errs, "主机表: "+herr.Error())
-		} else {
-			pg.Hosts = hosts
-		}
-		// wireless 配置 + getWirelessDevices 实时状态
-		wv, werr := buildWirelessView(ctx, a, dev.SessionID)
-		if werr != nil {
-			errs = append(errs, "无线配置: "+werr.Error())
-			a.Log.Warn("device config: wireless build failed",
-				"device_id", deviceID, "session_id", dev.SessionID, "err", werr)
-		} else {
-			pg.Wireless = wv
-		}
-		// 接入客户端（iwinfo assoclist 聚合所有无线接口）
-		if clients, cerr := fetchClients(ctx, a, dev.SessionID); cerr != nil {
-			errs = append(errs, "接入客户端: "+cerr.Error())
-		} else {
-			pg.Clients = clients
-		}
-		// 系统日志（log read，默认 200 行）
-		if logs, lerr := fetchLogs(ctx, a, dev.SessionID, 200); lerr != nil {
-			errs = append(errs, "系统日志: "+lerr.Error())
-		} else {
-			pg.Logs = logs
-		}
-		// 无线接口列表（扫描 TAB 下拉用）
-		if ifs := a.Wireless.Interfaces(ctx, dev.SessionID); len(ifs) > 0 {
-			pg.WirelessIfs = ifs
-		} else {
-			pg.WirelessIfs = []string{"wlan0"}
-		}
-		// 扫描仅在 tab=scan 时拉取（iwinfo scan 较慢，避免拖慢其他 TAB）
-		if pg.ActiveTab == "scan" {
-			curIf := c.DefaultQuery("scan_if", "")
-			if curIf == "" || !containsStr(pg.WirelessIfs, curIf) {
-				curIf = pg.WirelessIfs[0]
-			}
-			pg.CurScanIf = curIf
-			if sc, serr := a.Wireless.Scan(ctx, dev.SessionID, curIf); serr != nil {
-				errs = append(errs, "无线扫描: "+serr.Error())
-			} else {
-				pg.Scan = formatScanResults(sc)
-			}
+			errs = append(errs, tabs...)
 		}
 	}
 	// 状态快照（frps_helper 北向 additional_data，不依赖设备在线；以中文标签表格呈现）
@@ -669,12 +626,122 @@ func (a *App) handleDeviceConfig(c *gin.Context) {
 		pg.Firmware = fw
 	}
 	if len(errs) > 0 {
-		pg.Error = strings.Join(errs, "；")
+		if pg.Error == "" {
+			pg.Error = strings.Join(errs, "；")
+		} else {
+			pg.Error += "；" + strings.Join(errs, "；")
+		}
 	}
 	c.Status(http.StatusOK)
 	if rerr := a.Render.Render(c.Writer, "pages/devices/config", pg); rerr != nil {
 		a.Log.Error("render device config failed", "err", rerr)
 	}
+}
+
+// loadConfigTabs 拉取设备配置页各 TAB 的实时数据并写入 pg，返回各 TAB 的告警文案。
+// 设备隧道不可达（lucirpc.ErrUnreachable）时立即返回 unreachable=true：既避免把
+// frp 404 HTML 原文逐 TAB 拼进页面，也避免后续调用各等一次超时（设备半离线时页面会卡住数十秒）。
+func (a *App) loadConfigTabs(ctx context.Context, dev *frpsclient.Device, pg *deviceConfigPage, scanIf string) (errs []string, unreachable bool) {
+	// 概览：system.board + system.info
+	if ov, oerr := fetchOverview(ctx, a, dev.SessionID); oerr != nil {
+		if errors.Is(oerr, lucirpc.ErrUnreachable) {
+			return errs, true
+		}
+		errs = append(errs, "概览: "+oerr.Error())
+	} else {
+		pg.Overview = ov
+		if s := pickStr(ov.Board, "board_id", "serial", "serial_number", "boardname", "board_name"); s != "" {
+			pg.Serial = s
+		}
+	}
+	// network 配置 → LAN/WAN 分组（WAN 不存在 = 桥模式）
+	secs, nerr := fetchUciSections(ctx, a, dev.SessionID, "network")
+	if nerr != nil {
+		if errors.Is(nerr, lucirpc.ErrUnreachable) {
+			return errs, true
+		}
+		errs = append(errs, "网络配置: "+nerr.Error())
+		a.Log.Warn("device config: uci.get network failed",
+			"device_id", dev.DeviceID, "session_id", dev.SessionID, "err", nerr)
+	} else {
+		pg.LAN, pg.WAN = splitLanWan(secs)
+	}
+	// 网络接口状态（network.interface dump）
+	if ifs, ierr := fetchNetIfaces(ctx, a, dev.SessionID); ierr != nil {
+		if errors.Is(ierr, lucirpc.ErrUnreachable) {
+			return errs, true
+		}
+		errs = append(errs, "网络接口: "+ierr.Error())
+	} else {
+		pg.NetIfaces = ifs
+		pg.LanIP = lanIPFromIfaces(ifs)
+	}
+	// 主机表（luci-rpc getHostHints）；设备无该对象（未装 rpcd-mod-luci）时降级取数
+	if hosts, herr := fetchHostHints(ctx, a, dev.SessionID); herr != nil {
+		if errors.Is(herr, lucirpc.ErrUnreachable) {
+			return errs, true
+		}
+		if ubusrpc.IsObjectNotFound(herr) {
+			pg.Hosts = fetchHostsFallback(ctx, a, dev, pg.NetIfaces)
+		} else {
+			errs = append(errs, "主机表: "+herr.Error())
+		}
+	} else {
+		pg.Hosts = hosts
+	}
+	// wireless 配置 + getWirelessDevices 实时状态
+	wv, werr := buildWirelessView(ctx, a, dev.SessionID)
+	if werr != nil {
+		if errors.Is(werr, lucirpc.ErrUnreachable) {
+			return errs, true
+		}
+		errs = append(errs, "无线配置: "+werr.Error())
+		a.Log.Warn("device config: wireless build failed",
+			"device_id", dev.DeviceID, "session_id", dev.SessionID, "err", werr)
+	} else {
+		pg.Wireless = wv
+	}
+	// 接入客户端（iwinfo assoclist 聚合所有无线接口）
+	if clients, cerr := fetchClients(ctx, a, dev.SessionID); cerr != nil {
+		if errors.Is(cerr, lucirpc.ErrUnreachable) {
+			return errs, true
+		}
+		errs = append(errs, "接入客户端: "+cerr.Error())
+	} else {
+		pg.Clients = clients
+	}
+	// 系统日志（log read，默认 200 行）
+	if logs, lerr := fetchLogs(ctx, a, dev.SessionID, 200); lerr != nil {
+		if errors.Is(lerr, lucirpc.ErrUnreachable) {
+			return errs, true
+		}
+		errs = append(errs, "系统日志: "+lerr.Error())
+	} else {
+		pg.Logs = logs
+	}
+	// 无线接口列表（扫描 TAB 下拉用）
+	if ifs := a.Wireless.Interfaces(ctx, dev.SessionID); len(ifs) > 0 {
+		pg.WirelessIfs = ifs
+	} else {
+		pg.WirelessIfs = []string{"wlan0"}
+	}
+	// 扫描仅在 tab=scan 时拉取（iwinfo scan 较慢，避免拖慢其他 TAB）
+	if pg.ActiveTab == "scan" {
+		curIf := scanIf
+		if curIf == "" || !containsStr(pg.WirelessIfs, curIf) {
+			curIf = pg.WirelessIfs[0]
+		}
+		pg.CurScanIf = curIf
+		if sc, serr := a.Wireless.Scan(ctx, dev.SessionID, curIf); serr != nil {
+			if errors.Is(serr, lucirpc.ErrUnreachable) {
+				return errs, true
+			}
+			errs = append(errs, "无线扫描: "+serr.Error())
+		} else {
+			pg.Scan = formatScanResults(sc)
+		}
+	}
+	return errs, false
 }
 
 // fetchUciSections 调用 ubus uci get 拉取整个配置文件（省略 section 返回全部），
@@ -775,6 +842,93 @@ func fetchHostHints(ctx context.Context, a *App, sessionID string) ([]hostRow, e
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].MAC < rows[j].MAC })
 	return rows, nil
+}
+
+// fetchHostsFallback 在设备缺少 luci-rpc 对象（如 MonkFish AP 固件未装 rpcd-mod-luci）时构建主机表：
+//  1) uci dhcp 的静态 host 段（name/mac/ip）；
+//  2) network.interface dump 的 neighbors[]（ARP 邻居，补全 MAC/IP）。
+//
+// 两源均失败/为空时返回空表（页面显示“暂无主机记录”），不把 -32000 原文透传到页面。
+func fetchHostsFallback(ctx context.Context, a *App, dev *frpsclient.Device, ifaces []netIfaceRow) []hostRow {
+	type hint struct {
+		name string
+		ipv4 string
+		ipv6 string
+	}
+	hints := make(map[string]*hint)
+	get := func(mac string) *hint {
+		key := strings.ToLower(strings.TrimSpace(mac))
+		if key == "" {
+			return nil
+		}
+		h, ok := hints[key]
+		if !ok {
+			h = &hint{}
+			hints[key] = h
+		}
+		return h
+	}
+
+	// 1) DHCP 静态 host（uci dhcp）
+	secs, err := fetchUciSections(ctx, a, dev.SessionID, "dhcp")
+	if err != nil {
+		a.Log.Info("device config: fallback hosts: uci.get dhcp failed",
+			"device_id", dev.DeviceID, "session_id", dev.SessionID, "err", err)
+	}
+	for _, s := range secs {
+		if s.Type != "host" {
+			continue
+		}
+		name := secField(s, "name")
+		ip := secField(s, "ip")
+		// mac 可能是列表（uci.get 数组格式化为 "a, b"），统一按逗号/空白拆分
+		for _, mac := range strings.FieldsFunc(secField(s, "mac"), func(r rune) bool {
+			return r == ',' || r == ' ' || r == '\t'
+		}) {
+			if h := get(mac); h != nil {
+				if h.name == "" {
+					h.name = name
+				}
+				if h.ipv4 == "" {
+					h.ipv4 = ip
+				}
+			}
+		}
+	}
+
+	// 2) ARP 邻居（network.interface dump 的 neighbors[]）
+	for _, itf := range ifaces {
+		for _, nb := range itf.neighbors {
+			h := get(nb.MAC)
+			if h == nil {
+				continue
+			}
+			ip := nb.IP
+			if ip == "" {
+				ip = nb.IP6
+			}
+			switch {
+			case ip == "":
+			case strings.Contains(ip, ":"):
+				if h.ipv6 == "" {
+					h.ipv6 = ip
+				}
+			default:
+				if h.ipv4 == "" {
+					h.ipv4 = ip
+				}
+			}
+		}
+	}
+
+	rows := make([]hostRow, 0, len(hints))
+	for mac, h := range hints {
+		rows = append(rows, hostRow{MAC: mac, Name: h.name, IPv4: h.ipv4, IPv6: h.ipv6})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].MAC < rows[j].MAC })
+	a.Log.Info("device config: luci-rpc getHostHints unavailable, used fallback hosts",
+		"device_id", dev.DeviceID, "session_id", dev.SessionID, "rows", len(rows))
+	return rows
 }
 
 // fetchClients 聚合设备所有无线接口的 assoclist，返回接入客户端列表。
@@ -944,6 +1098,14 @@ func buildWirelessView(ctx context.Context, a *App, sessionID string) (*wireless
 			"session_id", sessionID, "err", lerr)
 		live = nil
 	}
+	// 兜底：部分固件未注册 luci-rpc 对象（ubus 返回 Object not found），
+	// 此时改用 iwinfo devices/info 直接取实时频率、htmodes、硬件型号。
+	if len(live) == 0 {
+		live = buildIwinfoLive(ctx, a, sessionID, sections)
+		if len(live) > 0 {
+			a.Log.Info("device config: live status via iwinfo fallback", "session_id", sessionID)
+		}
+	}
 
 	radioIdx := make(map[string]int)
 	for _, s := range sections {
@@ -1038,6 +1200,140 @@ func buildWirelessView(ctx context.Context, a *App, sessionID string) (*wireless
 		}
 	}
 	return wv, nil
+}
+
+// buildIwinfoLive 是 luci-rpc getWirelessDevices 不可用时的实时状态兜底。
+// 通过 iwinfo devices + iwinfo info 生成与 getWirelessDevices 兼容的结构：
+//
+//	map[radioName]{
+//	  "up": bool, "iwinfo": {...frequency/hwmodes_text/htmodes/hardware...},
+//	  "interfaces": [{"section": <wifi-iface>, "ifname": "phyN-ap0"}],
+//	}
+//
+// radio → phyN 的映射优先用 uci path 的 "+N" 后缀（如
+// platform/soc/18000000.wifi+1 → phy1），无后缀时按配置顺序。
+func buildIwinfoLive(ctx context.Context, a *App, sessionID string, sections []uciSection) map[string]any {
+	devs, err := a.Wireless.IwinfoDevices(ctx, sessionID)
+	if err != nil || len(devs) == 0 {
+		return nil
+	}
+	infos := make(map[string]map[string]any, len(devs))
+	for _, d := range devs {
+		info, ierr := a.Wireless.Iwinfo(ctx, sessionID, d)
+		if ierr != nil || len(info) == 0 {
+			continue
+		}
+		infos[d] = info
+	}
+	if len(infos) == 0 {
+		return nil
+	}
+
+	out := make(map[string]any)
+	radioOrder := 0
+	for _, s := range sections {
+		if s.Type != "wifi-device" {
+			continue
+		}
+		phyIdx := radioPhyIndex(secField(s, "path"), radioOrder)
+		radioOrder++
+		primary := pickIwinfoDevice(devs, phyIdx)
+		if primary == "" {
+			continue
+		}
+		info := infos[primary]
+
+		// 多 SSID 时按 ssid 匹配同一 phy 下的具体接口；匹配不到用主接口。
+		var ifaces []any
+		for _, iface := range sections {
+			if iface.Type != "wifi-iface" || secField(iface, "device") != s.Name {
+				continue
+			}
+			name := primary
+			if ssid := secField(iface, "ssid"); ssid != "" {
+				for _, d := range devs {
+					if phyIndexOfIfname(d) != phyIdx || infos[d] == nil {
+						continue
+					}
+					if liveStr(infos[d], "ssid") == ssid {
+						name = d
+						break
+					}
+				}
+			}
+			ifaces = append(ifaces, map[string]any{"section": iface.Name, "ifname": name})
+		}
+
+		up := liveStr(info, "ssid") != "" || liveFloat(info, "channel") > 0
+		out[s.Name] = map[string]any{
+			"up":         up,
+			"iwinfo":     info,
+			"interfaces": ifaces,
+		}
+	}
+	return out
+}
+
+// radioPhyIndex 由 uci path 推导 radio 对应的 phy 索引：优先取 "+N" 后缀，
+// 否则按配置顺序（radio0→0、radio1→1）。
+func radioPhyIndex(path string, order int) int {
+	if i := strings.LastIndex(strings.TrimSpace(path), "+"); i >= 0 {
+		if n, err := strconv.Atoi(strings.TrimSpace(path)[i+1:]); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return order
+}
+
+// phyIndexOfIfname 从 phy0-ap0/phy0-sta0 提取 phy 索引，无法识别返回 -1。
+func phyIndexOfIfname(name string) int {
+	if !strings.HasPrefix(name, "phy") {
+		return -1
+	}
+	rest := name[len("phy"):]
+	i := 0
+	for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' {
+		i++
+	}
+	if i == 0 {
+		return -1
+	}
+	n, err := strconv.Atoi(rest[:i])
+	if err != nil {
+		return -1
+	}
+	return n
+}
+
+// pickIwinfoDevice 选择 phy 索引对应的无线接口，优先 AP 接口（-ap），
+// 其次同 phy 的任意接口（如 STA 模式 -sta0）。
+func pickIwinfoDevice(devs []string, phyIdx int) string {
+	for _, d := range devs {
+		if phyIndexOfIfname(d) == phyIdx && strings.Contains(d, "-ap") {
+			return d
+		}
+	}
+	for _, d := range devs {
+		if phyIndexOfIfname(d) == phyIdx {
+			return d
+		}
+	}
+	return ""
+}
+
+// liveFloat 读取实时状态 map 的数值字段（JSON 数字统一为 float64）。
+func liveFloat(m map[string]any, key string) float64 {
+	switch v := m[key].(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
+	}
+	return 0
 }
 
 // secField 读取 section 选项值。
@@ -1901,9 +2197,12 @@ func (a *App) handleDeviceKickClient(c *gin.Context) {
 }
 
 // fetchFirmwareList 获取设备固件升级 TAB 数据：当前固件版本 + 固件库可用列表。
+// 硬件匹配优先取设备在线实时 system.board.model；取不到或设备离线时回退
+// frps_helper 注册的型号，保证离线设备也能看到与自身硬件匹配的固件。
 func (a *App) fetchFirmwareList(ctx context.Context, dev *frpsclient.Device) (*firmwarePage, error) {
 	pg := &firmwarePage{
 		FirmwareRoot: a.Firmware.Root(),
+		Model:        strings.TrimSpace(dev.Model),
 	}
 	// 设备在线时拉取当前固件版本与型号；离线时仅返回固件库列表
 	if dev.SessionID != "" && dev.Status == "online" {
@@ -1911,7 +2210,9 @@ func (a *App) fetchFirmwareList(ctx context.Context, dev *frpsclient.Device) (*f
 		if err := a.Ubus.CallInto(ctx, dev.SessionID, "system", "board", &board, map[string]any{}); err != nil {
 			a.Log.Warn("firmware: system.board failed", "device_id", dev.DeviceID, "err", err)
 		} else {
-			pg.Model = mapStr(board, "model")
+			if m := strings.TrimSpace(mapStr(board, "model")); m != "" {
+				pg.Model = m
+			}
 			var rel struct {
 				Release struct {
 					Distribution string `json:"distribution"`
@@ -1962,13 +2263,19 @@ func (a *App) handleDeviceFirmwareUpgrade(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 
-	// 获取设备硬件型号（用于定位固件库目录）
+	// 获取设备硬件型号（用于定位固件库目录）：在线实时优先，取不到回退注册型号。
+	model := strings.TrimSpace(dev.Model)
 	var board map[string]any
 	if err := a.Ubus.CallInto(ctx, dev.SessionID, "system", "board", &board, map[string]any{}); err != nil {
-		errMsg("获取设备型号失败: " + err.Error())
+		a.Log.Warn("firmware upgrade: system.board failed, fallback to registered model",
+			"device_id", dev.DeviceID, "model", model, "err", err)
+	} else if m := strings.TrimSpace(mapStr(board, "model")); m != "" {
+		model = m
+	}
+	if model == "" {
+		errMsg("无法获取设备硬件型号，已拒绝升级")
 		return
 	}
-	model := mapStr(board, "model")
 
 	// 1. 固件库校验
 	f, _, desc, err := a.Firmware.Open(model, filename)

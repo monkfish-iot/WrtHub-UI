@@ -74,21 +74,21 @@ func (a *App) handleWireless(c *gin.Context) {
 			// 聚合所有无线接口的接入终端（终端可能在任一 radio 上，仅查单接口会漏）
 			st, err := a.Wireless.Stations(ctx, dev.SessionID)
 			if err != nil {
-				pg.Error = err.Error()
+				pg.Error = friendlyDeviceErr(err)
 			} else {
 				pg.Stations = st
 			}
 		case "scan":
 			sc, err := a.Wireless.Scan(ctx, dev.SessionID, curIfname)
 			if err != nil {
-				pg.Error = err.Error()
+				pg.Error = friendlyDeviceErr(err)
 			} else {
 				pg.Scan = formatScanResults(sc)
 			}
 		default: // overview
 			info, err := a.Wireless.Iwinfo(ctx, dev.SessionID, curIfname)
 			if err != nil {
-				pg.Error = err.Error()
+				pg.Error = friendlyDeviceErr(err)
 			} else {
 				pg.Iwinfo = info
 			}

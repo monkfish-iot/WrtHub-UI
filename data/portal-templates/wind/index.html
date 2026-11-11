@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow">
+  <title>连接网络</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div class="breeze breeze-1" aria-hidden="true"></div>
+  <div class="breeze breeze-2" aria-hidden="true"></div>
+
+  <main class="shell">
+    <section class="card">
+      <div class="accent" id="pAccent"></div>
+      <div class="card-inner">
+        <header class="brand">
+          <span class="brand-mark" id="pBrandMark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+              <path d="M3 8h9.5a2.5 2.5 0 1 0-2.5-2.5"/>
+              <path d="M3 12h13a2.5 2.5 0 1 1-2.5 2.5"/>
+              <path d="M3 16h6.5a2 2 0 1 1-2 2"/>
+            </svg>
+          </span>
+          <img class="brand-logo" id="pLogo" alt="logo">
+          <span class="brand-text">
+            <b id="pBrand">Wind WiFi</b>
+            <small id="pTagline">轻盈 · 顺畅 · 安全</small>
+          </span>
+        </header>
+
+        <p class="pill"><i class="dot"></i><span id="pPill">安全连接 · 云端认证</span></p>
+
+        <h1 id="pTopic">连接网络，即刻上网</h1>
+        <p class="sub" id="pSub">输入账号信息，即可畅享高速网络</p>
+
+        <dl class="access" id="pAccess" hidden>
+          <div class="access-title" id="pAccessTitle">本次接入信息</div>
+          <div class="row"><dt>客户端 IP</dt><dd id="pIp">-</dd></div>
+          <div class="row"><dt>客户端 MAC</dt><dd id="pMac">-</dd></div>
+          <div class="row"><dt>网关地址</dt><dd id="pAcIp">-</dd></div>
+        </dl>
+
+        <form id="loginForm" novalidate>
+          <label class="field" for="username">
+            <span id="pUserLabel">用户名</span>
+            <input id="username" name="username" type="text" placeholder="请输入用户名" autocomplete="username" required>
+          </label>
+          <label class="field" for="userpasswd">
+            <span id="pPassLabel">密码</span>
+            <input id="userpasswd" name="userpasswd" type="password" placeholder="请输入密码" autocomplete="current-password" required>
+          </label>
+          <button type="submit" id="pBtn">登 录</button>
+        </form>
+
+        <p class="msg" id="pMsg" role="alert" hidden></p>
+        <p class="foot" id="pFoot">连接即表示同意《上网服务条款》</p>
+        <span class="tag">WIND PORTAL</span>
+      </div>
+    </section>
+  </main>
+
+  <script>
+  // WrtHub 可视化编辑配置约定：URL query 存在时优先（编辑中实时预览），
+  // 否则读服务端注入的 window.PORTAL_CONFIG（已保存配置）。
+  (function () {
+    var cfg = window.PORTAL_CONFIG || {};
+    var q = new URLSearchParams(location.search);
+    q.forEach(function (v, k) { if (k !== 't') cfg[k] = v; });
+
+    function $(id) { return document.getElementById(id); }
+    function text(id, v) { if (v) { var el = $(id); if (el) el.textContent = v; } }
+    function color(v) { return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v || '') ? v : ''; }
+    function cssURL(v) {
+      if (!v) { return ''; }
+      var s = String(v).replace(/["\\\n\r]/g, function (c) { return encodeURIComponent(c); });
+      return 'url("' + s + '")';
+    }
+
+    if (cfg.page_title) { document.title = cfg.page_title; }
+    text('pBrand', cfg.brand);
+    text('pTagline', cfg.tagline);
+    text('pPill', cfg.pill_text);
+    text('pTopic', cfg.topic);
+    text('pSub', cfg.subtitle);
+    text('pAccessTitle', cfg.access_title);
+    text('pUserLabel', cfg.username_label);
+    text('pPassLabel', cfg.password_label);
+    text('pBtn', cfg.button_text);
+    text('pFoot', cfg.footer);
+
+    var user = $('username'), pass = $('userpasswd');
+    if (cfg.username_placeholder) { user.placeholder = cfg.username_placeholder; }
+    if (cfg.password_placeholder) { pass.placeholder = cfg.password_placeholder; }
+
+    var c1 = color(cfg.accent_color), c2 = color(cfg.accent_color_end);
+    if (c1) { document.documentElement.style.setProperty('--accent', c1); }
+    if (c2) { document.documentElement.style.setProperty('--accent-2', c2); }
+
+    if (cfg.bg_image) {
+      document.body.style.backgroundImage = cssURL(cfg.bg_image);
+      document.body.style.backgroundSize = 'cover';
+      document.body.style.backgroundPosition = 'center';
+      document.body.style.backgroundRepeat = 'no-repeat';
+    } else if (color(cfg.bg_color)) {
+      document.body.style.background = cfg.bg_color;
+    }
+
+    if (cfg.logo_image) {
+      $('pLogo').src = cfg.logo_image;
+      $('pLogo').style.display = 'block';
+      $('pBrandMark').style.display = 'none';
+    }
+
+    // 接入信息：AP 302 下发的 wlanuserip / wlanusermac / wlanacip
+    var ip = q.get('wlanuserip'), mac = q.get('wlanusermac'), acip = q.get('wlanacip');
+    if (ip || mac || acip) {
+      text('pIp', ip || '-');
+      text('pMac', mac || '-');
+      text('pAcIp', acip || location.hostname);
+      $('pAccess').hidden = false;
+    }
+  })();
+  </script>
+
+  <script>
+  // 认证流程约定（与 webauthd 本地模板一致）：
+  // 1. JS 拦截表单提交，原始 query 参数 + username/userpasswd 作为 body POST 到 /v1/login；
+  //    /v1/login 由 AP nginx 截流转本地 webauthd，请求不到云端。
+  // 2. 响应 JSON 的 error_code == 0 表示认证成功，跳转模板内 success.html
+  //    （相对路径，经 <base href="/p/{code}/"> 解析，云 nginx 直出静态文件）；
+  //    失败时在页面内展示错误文案。
+  (function () {
+    var form = document.getElementById('loginForm');
+    var btn = document.getElementById('pBtn');
+    var msg = document.getElementById('pMsg');
+    var btnLabel = btn.textContent; // 已在配置脚本中应用自定义按钮文案
+
+    var ERR_TEXT = {
+      '-101': '没有发现用户',
+      '-102': '用户已经认证成功',
+      '-103': '认证超时',
+      '-104': '正在认证...',
+      '-105': '用户正在下线',
+      '-108': 'RADIUS 认证错误',
+      '-112': '用户名为空或错误',
+      '-113': '用户名或密码错误',
+      '-116': '未知的用户状态',
+      '-128': '登录失败次数过多，请稍后再试',
+      '-202': '用户名或密码错误'
+    };
+
+    function showMsg(text, ok) {
+      msg.textContent = text || '';
+      msg.hidden = !text;
+      msg.className = 'msg' + (ok ? ' ok' : '');
+    }
+
+    function setBusy(busy) {
+      btn.disabled = busy;
+      btn.textContent = busy ? '认证中...' : btnLabel;
+    }
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var username = document.getElementById('username').value.trim();
+      var userpasswd = document.getElementById('userpasswd').value;
+      if (!username) { showMsg('请输入用户名'); return; }
+      if (!userpasswd) { showMsg('请输入密码'); return; }
+
+      // 透传 AP 302 下发的全部原始参数（wlanuserip/wlanusermac/wlanacip/...），
+      // 仅剔除模板预览参数 t，避免污染认证请求。
+      var body = new URLSearchParams(location.search);
+      body.delete('t');
+      body.set('username', username);
+      body.set('userpasswd', userpasswd);
+
+      showMsg('');
+      setBusy(true);
+
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', '/v1/login', true);
+      xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+      xhr.timeout = 10000;
+      xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) { return; }
+        setBusy(false);
+        var res;
+        try {
+          res = JSON.parse(xhr.responseText || 'null');
+        } catch (err) {
+          res = null;
+        }
+        if (!res) {
+          showMsg(xhr.status === 0 ? '网络错误，请检查网络连接' : '服务器响应格式错误');
+          return;
+        }
+        if (res.error_code === 0) {
+          showMsg('认证成功，正在跳转...', true);
+          var q = res.body ? new URLSearchParams(res.body).toString() : '';
+          location.href = 'success.html' + (q ? '?' + q : '');
+          return;
+        }
+        showMsg(ERR_TEXT[String(res.error_code)] || res.msg || ('系统错误，请联系管理员，错误码: ' + res.error_code));
+      };
+      xhr.ontimeout = function () { setBusy(false); showMsg('请求超时，请稍后重试'); };
+      xhr.onerror = function () { setBusy(false); showMsg('网络错误，请检查网络连接'); };
+      xhr.send(body.toString());
+    });
+  })();
+  </script>
+</body>
+</html>

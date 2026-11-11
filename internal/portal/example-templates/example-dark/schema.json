@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "pages": [
+    {
+      "id": "login",
+      "name": "认证页",
+      "file": "index.html",
+      "fields": [
+        { "key": "page_title", "label": "页面标题", "type": "text", "default": "访客网络认证", "maxlength": 64 },
+        { "key": "brand", "label": "品牌名", "type": "text", "default": "Guest WiFi", "maxlength": 32 },
+        { "key": "topic", "label": "主标题", "type": "text", "default": "访客网络认证", "maxlength": 64 },
+        { "key": "subtitle", "label": "副标题", "type": "text", "default": "接入本网络需完成认证，认证成功后 24 小时内免重复登录", "maxlength": 128 },
+        { "key": "button_text", "label": "按钮文字", "type": "text", "default": "一键认证上网", "maxlength": 32 },
+        { "key": "footer", "label": "页脚文案", "type": "text", "default": "示例模板 · 仅作演示用途", "maxlength": 128 },
+        { "key": "accent_color", "label": "主题色", "type": "color", "default": "#6366f1", "help": "影响按钮与高亮文字" },
+        { "key": "bg_image", "label": "页面背景图", "type": "image", "help": "选择后覆盖深色背景" }
+      ]
+    }
+  ]
+}

@@ -126,6 +126,19 @@ func (w *Wireless) Interfaces(ctx context.Context, sessionID string) []string {
 	return nil
 }
 
+// IwinfoDevices 调用 ubus iwinfo devices 返回无线接口名列表（phy0-ap0/phy0-sta0...）。
+// 部分固件未安装 rpcd-mod-iwinfo 扩展时会返回失败。
+func (w *Wireless) IwinfoDevices(ctx context.Context, sessionID string) ([]string, error) {
+	var devList struct {
+		Devices []string `json:"devices"`
+	}
+	if err := w.ubus.CallInto(ctx, sessionID, "iwinfo", "devices", &devList, map[string]any{}); err != nil {
+		return nil, err
+	}
+	sort.Strings(devList.Devices)
+	return devList.Devices, nil
+}
+
 // Iwinfo 调用 ubus iwinfo info 拉取设备实时信息（信号/信道/BSSID/噪声等）。
 // params: {"device":"phy0-ap0"}（网络接口名）。
 func (w *Wireless) Iwinfo(ctx context.Context, sessionID, ifname string) (map[string]any, error) {

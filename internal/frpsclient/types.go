@@ -20,18 +20,29 @@ type Device struct {
 	DeviceID         string          `json:"device_id"`
 	DeviceName       string          `json:"device_name"`
 	Model            string          `json:"model"`
+	Version          string          `json:"version"`
 	MacAddress       string          `json:"mac_address"`
 	Vendor           string          `json:"vendor"`
 	Status           string          `json:"status"`
 	AssignmentStatus string          `json:"assignment_status"`
 	SessionID        string          `json:"session_id"`
 	ExtIPAddress     string          `json:"ext_ip_address"`
+	LanIP            string          `json:"lan_ip"`    // local_if 的 IPv4（join/status 上报）
+	FrpcMode         string          `json:"frpc_mode"` // on=强制隧道，off=强制直连，""/auto=按 IP 自动判断
 	UserName         string          `json:"user_name"`
 	AdditionalData   json.RawMessage `json:"additional_data"`
-	LastHeartbeat    *time.Time      `json:"last_heartbeat"`
-	FirstSeen        *time.Time      `json:"first_seen"`
-	CreatedAt        *time.Time      `json:"created_at"`
-	UpdatedAt        *time.Time      `json:"updated_at"`
+	// RADIUS 对接参数（join 时由 frps_helper 填充；密钥字段在列表接口中隐藏，
+	// 仅 GET /api/v1/devices/radius 透出，见 DeviceRadiusItem）
+	RadAuthServer string     `json:"rad_auth_server"`
+	RadAuthPort   int        `json:"rad_auth_port"`
+	RadAcctServer string     `json:"rad_acct_server"`
+	RadAcctPort   int        `json:"rad_acct_port"`
+	RadNasIP      string     `json:"rad_nas_ip"`
+	LastHeartbeat *time.Time `json:"last_heartbeat"`
+	OnlineSince   *time.Time `json:"online_since"`
+	FirstSeen     *time.Time `json:"first_seen"`
+	CreatedAt     *time.Time `json:"created_at"`
+	UpdatedAt     *time.Time `json:"updated_at"`
 }
 
 // DeviceListResult 是 GET /api/v1/devices 的 body。

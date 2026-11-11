@@ -1,66 +1,91 @@
 {{define "content"}}
+{{if .FlashOK}}<div class="alert alert-success alert-dismissible fade show py-2 small">{{.FlashOK}}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{{end}}
+{{if .FlashErr}}<div class="alert alert-danger alert-dismissible fade show py-2 small">{{.FlashErr}}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{{end}}
+
 <div class="toolbar-compact rounded-top border">
-    <form method="get" action="/devices" class="row g-2 align-items-end">
-        <div class="col-md-3 col-sm-6">
-            <label class="form-label mb-0 small">关键词</label>
-            <input type="text" class="form-control form-control-sm" name="keyword" value="{{.Filters.Keyword}}" placeholder="名称 / ID / MAC">
-        </div>
-        <div class="col-md-2 col-sm-6">
-            <label class="form-label mb-0 small">状态</label>
-            <select class="form-select form-select-sm" name="status">
-                <option value="">全部</option>
-                <option value="online" {{if eq .Filters.Status `online`}}selected{{end}}>在线</option>
-                <option value="offline" {{if eq .Filters.Status `offline`}}selected{{end}}>离线</option>
-                <option value="pending" {{if eq .Filters.Status `pending`}}selected{{end}}>待定</option>
-            </select>
-        </div>
-        <div class="col-md-2 col-sm-6">
-            <label class="form-label mb-0 small">型号</label>
-            <input type="text" class="form-control form-control-sm" name="model" value="{{.Filters.Model}}">
-        </div>
-        <div class="col-md-2 col-sm-6">
-            <button class="btn btn-primary btn-sm w-100"><i class="fas fa-search"></i> 查询</button>
-        </div>
+    <form method="get" action="/devices" class="d-flex flex-wrap align-items-center gap-2">
+        <label class="form-label mb-0 small text-nowrap" for="fKw">关键词</label>
+        <input id="fKw" type="text" class="form-control form-control-sm" name="keyword" value="{{.Filters.Keyword}}" placeholder="名称 / ID / MAC" style="width:220px;">
+        <label class="form-label mb-0 small text-nowrap" for="fSt">状态</label>
+        <select id="fSt" class="form-select form-select-sm" name="status" style="width:100px;">
+            <option value="">全部</option>
+            <option value="online" {{if eq .Filters.Status `online`}}selected{{end}}>在线</option>
+            <option value="offline" {{if eq .Filters.Status `offline`}}selected{{end}}>离线</option>
+            <option value="pending" {{if eq .Filters.Status `pending`}}selected{{end}}>待定</option>
+        </select>
+        <label class="form-label mb-0 small text-nowrap" for="fModel">型号</label>
+        <input id="fModel" type="text" class="form-control form-control-sm" name="model" value="{{.Filters.Model}}" style="width:140px;">
+        <button class="btn btn-primary btn-sm"><i class="fas fa-search"></i> 查询</button>
     </form>
 </div>
 
 <div class="card rounded-0 rounded-bottom shadow-sm">
     <div class="card-header d-flex justify-content-between align-items-center bg-white py-2">
         <span class="small fw-semibold"><i class="fas fa-list-ul me-1"></i> 设备列表 (共 {{.Total}} 条)</span>
+        <div class="d-flex align-items-center gap-2">
+            <!-- 自动注册开关：开启后设备可自行 join 接入；与预注册入口互斥显示 -->
+            <form method="post" action="/devices/auto-register" class="d-flex align-items-center">
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" role="switch" id="autoRegisterSwitch" name="enabled" value="1"
+                           {{if .AutoRegister}}checked{{end}}
+                           onchange="if(this.checked && !confirm('开启后任何新设备都可自行接入，无需预注册。确认开启？')){this.checked=false;return;}this.form.submit();">
+                    <label class="form-check-label small mb-0" for="autoRegisterSwitch">自动注册</label>
+                </div>
+            </form>
+            {{if .AutoRegister}}
+            <span class="small text-muted" title="运行时开关：重启 frps_helper 后恢复其配置文件值">已开启，设备可自行接入</span>
+            {{else}}
+            <button type="button" class="btn btn-primary btn-sm" onclick="bootstrap.Modal.getOrCreateInstance(document.getElementById('preRegisterModal')).show()">
+                <i class="fas fa-plus me-1"></i> 预注册设备
+            </button>
+            {{end}}
+        </div>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-sm table-hover align-middle mb-0">
                 <thead class="table-light">
                     <tr>
+                        <th>设备 ID</th>
                         <th>设备名称</th>
-                        <th>访问地址</th>
-                        <th>状态</th>
                         <th>型号</th>
-                        <th>MAC</th>
-                        <th>厂商</th>
-                        <th>公网IP</th>
+                        <th>版本</th>
+                        <th>在线状态</th>
+                        <th>上线开始时间</th>
+                        <th>在线时长</th>
+                        <th>外网 IP</th>
+                        <th>MAC 地址</th>
                         <th>最后心跳</th>
-                        <th style="width:130px;">操作</th>
+                        <th style="width:120px;">操作</th>
                     </tr>
                 </thead>
                 <tbody>
                 {{range .Devices}}
                     <tr>
+                        <td><code>{{.DeviceID}}</code></td>
                         <td>{{.DeviceName}}</td>
-                        <td><code>{{.SessionID}}.{{$.Config.DeviceRpc.DomainSuffix}}:{{$.Config.DeviceRpc.Port}}</code></td>
-                        <td><span class="badge bg-{{statusBadge .Status}}">{{.Status}}</span></td>
                         <td>{{.Model}}</td>
-                        <td>{{.MacAddress}}</td>
-                        <td>{{.Vendor}}</td>
+                        <td>{{.Version}}</td>
+                        <td><span class="badge bg-{{statusBadge .Status}}">{{if eq .Status "online"}}在线{{else if eq .Status "offline"}}离线{{else}}{{.Status}}{{end}}</span></td>
+                        <td>{{tFmt .OnlineSince}}</td>
+                        <td>{{durSince .OnlineSince}}</td>
                         <td>{{.ExtIPAddress}}</td>
+                        <td>{{.MacAddress}}</td>
                         <td>{{tFmt .LastHeartbeat}}</td>
                         <td class="text-nowrap">
-                            <a href="/devices/{{.DeviceID}}/config" class="btn btn-outline-warning btn-sm py-0 px-1" title="UCI 配置"><i class="fas fa-cog"></i></a>
+                            <a href="/devices/{{.DeviceID}}" class="btn btn-outline-info btn-sm py-0 px-1" title="详情"><i class="fas fa-circle-info"></i></a>
+                            {{if eq .Status "online"}}
+                            <a href="/devices/{{.DeviceID}}/config" class="btn btn-outline-warning btn-sm py-0 px-1" title="配置"><i class="fas fa-cog"></i></a>
+                            {{else}}
+                            <span class="d-inline-block" title="设备离线，无法配置"><button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" disabled><i class="fas fa-cog"></i></button></span>
+                            {{end}}
+                            <button type="button" class="btn btn-outline-danger btn-sm py-0 px-1" title="删除设备"
+                                    data-bs-toggle="modal" data-bs-target="#deleteDeviceModal"
+                                    data-device-id="{{.DeviceID}}" data-device-name="{{.DeviceName}}"><i class="fas fa-trash"></i></button>
                         </td>
                     </tr>
                 {{else}}
-                    <tr><td colspan="9" class="text-center text-muted py-3">暂无设备</td></tr>
+                    <tr><td colspan="11" class="text-center text-muted py-3">暂无设备</td></tr>
                 {{end}}
                 </tbody>
             </table>
@@ -80,4 +105,82 @@
         </nav>
     </div>
 </div>
+
+<!-- 预注册设备（对应 tentant-mng"绑定设备"，单租户化：仅按 device_id 创建占位记录） -->
+<div class="modal fade" id="preRegisterModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="/devices/pre-register">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="fas fa-plus me-1"></i> 预注册设备</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-2">
+                        <div class="col-12">
+                            <label class="form-label mb-0 small fw-semibold">设备 ID <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control form-control-sm" name="device_id" required placeholder="输入待接入设备的 ID">
+                        </div>
+                        <div class="col-12 small text-muted">预注册后设备首次上线 join 时自动补齐其余参数并下发凭证。以下字段可选：</div>
+                        <div class="col-md-6">
+                            <label class="form-label mb-0 small text-muted">MAC 地址</label>
+                            <input type="text" class="form-control form-control-sm" name="mac" placeholder="12 位小写十六进制">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label mb-0 small text-muted">设备名称</label>
+                            <input type="text" class="form-control form-control-sm" name="device_name">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label mb-0 small text-muted">型号</label>
+                            <input type="text" class="form-control form-control-sm" name="model">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-check me-1"></i> 预注册</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 删除设备确认（软删除，在线设备服务端会拒绝） -->
+<div class="modal fade" id="deleteDeviceModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="/devices/delete">
+                <input type="hidden" name="device_id" id="deleteDeviceID">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title text-danger"><i class="fas fa-exclamation-triangle me-1"></i> 删除设备</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2 small">确认删除以下设备？删除后该设备将不再出现在列表中，需重新注册才能接入。</p>
+                    <div class="border rounded p-2 bg-light small">
+                        <div>设备 ID：<code id="deleteDeviceIDText"></code></div>
+                        <div>设备名称：<span id="deleteDeviceNameText"></span></div>
+                    </div>
+                    <div class="small text-muted mt-2">在线设备无法删除，请先断开其连接。</div>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-trash me-1"></i> 确认删除</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.getElementById('deleteDeviceModal').addEventListener('show.bs.modal', function (ev) {
+        var btn = ev.relatedTarget;
+        if (!btn) return;
+        var id = btn.getAttribute('data-device-id') || '';
+        var name = btn.getAttribute('data-device-name') || '';
+        document.getElementById('deleteDeviceID').value = id;
+        document.getElementById('deleteDeviceIDText').textContent = id;
+        document.getElementById('deleteDeviceNameText').textContent = name || '（未命名）';
+    });
+</script>
 {{end}}

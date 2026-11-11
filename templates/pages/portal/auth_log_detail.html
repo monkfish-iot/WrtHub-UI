@@ -1,0 +1,41 @@
+{{define "content"}}
+<div class="card shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center bg-white py-2">
+        <span class="small fw-semibold"><i class="fas fa-file-lines me-1"></i> 认证日志详情 <code>{{.Log.ID}}</code></span>
+        <a href="/portal/auth-logs" class="btn btn-outline-secondary btn-sm"><i class="fas fa-arrow-left me-1"></i> 返回列表</a>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-6">
+                <table class="table table-sm mb-0 small">
+                    <tr><td class="text-muted" style="width:110px;">请求时间</td><td>{{tFmt .Log.RequestTime}}</td></tr>
+                    <tr><td class="text-muted">状态</td>
+                        <td><span class="badge bg-{{if eq .Log.Status "success"}}success{{else if eq .Log.Status "failed"}}danger{{else}}secondary{{end}}">
+                            {{if eq .Log.Status "received"}}已接收{{else if eq .Log.Status "forwarding"}}转发中{{else if eq .Log.Status "success"}}成功{{else if eq .Log.Status "failed"}}失败{{else}}{{.Log.Status}}{{end}}
+                        </span></td></tr>
+                    <tr><td class="text-muted">用户名</td><td>{{if .Log.Username}}{{.Log.Username}}{{else}}-{{end}}</td></tr>
+                    <tr><td class="text-muted">MAC</td><td><code>{{.Log.Mac}}</code></td></tr>
+                    <tr><td class="text-muted">终端 IP</td><td>{{if .Log.UserIP}}{{.Log.UserIP}}{{else}}-{{end}}</td></tr>
+                    <tr><td class="text-muted">AC IP / 名称</td><td>{{if .Log.ACIP}}{{.Log.ACIP}}{{else}}-{{end}} / {{if .Log.ACName}}{{.Log.ACName}}{{else}}-{{end}}</td></tr>
+                    <tr><td class="text-muted">SSID / APID</td><td>{{if .Log.SSID}}{{.Log.SSID}}{{else}}-{{end}} / {{if .Log.APID}}{{.Log.APID}}{{else}}-{{end}}</td></tr>
+                </table>
+            </div>
+            <div class="col-md-6">
+                <table class="table table-sm mb-0 small">
+                    <tr><td class="text-muted" style="width:110px;">模板</td><td>{{if .Log.TemplateCode}}<code>{{.Log.TemplateCode}}</code>{{else}}-{{end}}</td></tr>
+                    <tr><td class="text-muted">error_code / HTTP</td><td>{{if .Log.ErrorCode}}{{.Log.ErrorCode}}{{else}}-{{end}} / {{if .Log.HTTPStatus}}{{.Log.HTTPStatus}}{{else}}-{{end}}</td></tr>
+                    <tr><td class="text-muted">耗时</td><td>{{if .Log.ElapsedMS}}{{.Log.ElapsedMS}}ms{{else}}-{{end}}</td></tr>
+                    <tr><td class="text-muted">转发 URL</td>
+                        <td class="text-break" style="word-break:break-all;">{{if .Log.ForwardURL}}<code>{{.Log.ForwardURL}}</code>{{else}}-{{end}}</td></tr>
+                </table>
+            </div>
+            <div class="col-12 mt-2">
+                <div class="small fw-semibold text-muted mb-1">GET 参数</div>
+                <pre class="border rounded bg-light p-2 small mb-2" style="max-height:200px;overflow:auto;">{{if .GetParams}}{{.GetParams}}{{else}}{}{{end}}</pre>
+                <div class="small fw-semibold text-muted mb-1">响应摘要</div>
+                <pre class="border rounded bg-light p-2 small mb-0" style="max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-all;">{{if .Log.ResponseExcerpt}}{{.Log.ResponseExcerpt}}{{else}}-{{end}}</pre>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}

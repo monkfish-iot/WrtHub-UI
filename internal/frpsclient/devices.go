@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 )
@@ -72,6 +73,80 @@ func (c *Client) GetDevice(ctx context.Context, deviceID string) (*Device, error
 		return nil, &APIError{ErrorCode: -1004, Msg: "device not found"}
 	}
 	return &r.Items[0], nil
+}
+
+// PreRegisterDeviceRequest 是 POST /api/v1/devices/pre-register 的请求体。
+// 仅 device_id 必填；其余字段为可选补充，设备上线 join 时自动补齐。
+type PreRegisterDeviceRequest struct {
+	DeviceID   string `json:"device_id"`
+	MAC        string `json:"mac,omitempty"`
+	DeviceName string `json:"device_name,omitempty"`
+	Model      string `json:"model,omitempty"`
+}
+
+// PreRegisterDevice 预注册设备：创建占位记录（auto_register=false 场景下提前放行指定设备）。
+func (c *Client) PreRegisterDevice(ctx context.Context, req *PreRegisterDeviceRequest) (*Device, error) {
+	data, err := c.post(ctx, "/api/v1/devices/pre-register", req)
+	if err != nil {
+		return nil, err
+	}
+	body, err := unwrap(data)
+	if err != nil {
+		return nil, err
+	}
+	var dev Device
+	if err := json.Unmarshal(body, &dev); err != nil {
+		return nil, fmt.Errorf("decode device: %w", err)
+	}
+	return &dev, nil
+}
+
+// GetAutoRegister 查询设备自动注册开关（GET /api/v1/config/auto_register）。
+// true 时设备可自行 join 接入；false 时仅预注册设备可接入。
+func (c *Client) GetAutoRegister(ctx context.Context) (bool, error) {
+	data, err := c.get(ctx, "/api/v1/config/auto_register", nil)
+	if err != nil {
+		return false, err
+	}
+	body, err := unwrap(data)
+	if err != nil {
+		return false, err
+	}
+	var r struct {
+		AutoRegister bool `json:"auto_register"`
+	}
+	if err := json.Unmarshal(body, &r); err != nil {
+		return false, fmt.Errorf("decode auto_register: %w", err)
+	}
+	return r.AutoRegister, nil
+}
+
+// SetAutoRegister 设置设备自动注册开关（PUT /api/v1/config/auto_register，运行时即时生效）。
+func (c *Client) SetAutoRegister(ctx context.Context, enabled bool) error {
+	data, err := c.put(ctx, "/api/v1/config/auto_register", map[string]bool{"auto_register": enabled})
+	if err != nil {
+		return err
+	}
+	if _, err := unwrap(data); err != nil {
+		return err
+	}
+	return nil
+}
+
+// DeleteDevice 逻辑删除设备（DELETE /api/v1/devices/delete）。
+// 服务端软删除（写 deleted_at），在线设备会被拒绝。
+func (c *Client) DeleteDevice(ctx context.Context, deviceID string) error {
+	if deviceID == "" {
+		return &APIError{ErrorCode: -1004, Msg: "device_id is required"}
+	}
+	data, err := c.send(ctx, http.MethodDelete, "/api/v1/devices/delete", map[string]string{"device_id": deviceID})
+	if err != nil {
+		return err
+	}
+	if _, err := unwrap(data); err != nil {
+		return err
+	}
+	return nil
 }
 
 // GetDeviceBySession 按 session_id 获取单个设备。

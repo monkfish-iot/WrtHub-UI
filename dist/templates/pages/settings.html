@@ -1,0 +1,1193 @@
+{{define "content"}}
+{{if .FlashOK}}<div class="alert alert-success alert-dismissible fade show py-2 small">{{.FlashOK}}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{{end}}
+{{if .FlashErr}}<div class="alert alert-danger alert-dismissible fade show py-2 small">{{.FlashErr}}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{{end}}
+
+<div class="card shadow-sm mb-3">
+    <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+        <span class="small fw-semibold"><i class="fas fa-sliders me-1"></i> 系统设置</span>
+    </div>
+    <div class="card-body">
+        <!-- TAB 导航 -->
+        <ul class="nav nav-tabs mb-3" id="settingsTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link small{{if not (or (eq .Tab "radius") (eq .Tab "certs") (eq .Tab "firmware"))}} active{{end}}" id="tab-portal" data-bs-toggle="tab" data-bs-target="#pane-portal" type="button" role="tab">
+                    <i class="fas fa-cog me-1"></i> PORTAL 设置
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link small{{if eq .Tab "radius"}} active{{end}}" id="tab-radius" data-bs-toggle="tab" data-bs-target="#pane-radius" type="button" role="tab">
+                    <i class="fas fa-server me-1"></i> RADIUS 服务
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link small{{if eq .Tab "certs"}} active{{end}}" id="tab-certs" data-bs-toggle="tab" data-bs-target="#pane-certs" type="button" role="tab">
+                    <i class="fas fa-certificate me-1"></i> 证书管理
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link small{{if eq .Tab "firmware"}} active{{end}}" id="tab-firmware" data-bs-toggle="tab" data-bs-target="#pane-firmware" type="button" role="tab">
+                    <i class="fas fa-microchip me-1"></i> 固件管理
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="settingsTabsContent">
+            <!-- TAB 1: PORTAL 设置 -->
+            <div class="tab-pane fade{{if not (or (eq .Tab "radius") (eq .Tab "certs") (eq .Tab "firmware"))}} show active{{end}}" id="pane-portal" role="tabpanel">
+                <div class="alert alert-info py-2 small mb-3">
+                    <i class="fas fa-circle-info me-1"></i>
+                    本页配置存储在数据库 <code>settings</code> 表（覆盖层）：首次启动时由 <code>config.yaml</code> 种子，
+                    此后修改文件对应项不再生效；删除该表数据行并重启可回退文件默认值重新种子。
+                    所有修改保存后立即热生效，无需重启。监听地址、存储、frps_helper 连接信息等引导配置仍在
+                    <code>config.yaml</code> 中管理。
+                </div>
+                {{if .S}}
+                <form method="post" action="/settings" class="small" style="max-width: 760px;">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <div class="row align-items-start">
+                                <label class="col-sm-3 col-form-label col-form-label-sm fw-semibold pt-1">PORTAL 模板根目录</label>
+                                <div class="col-sm-9">
+                                    <input type="text" class="form-control form-control-sm font-monospace" name="portal_template_root"
+                                           value="{{.S.PortalTemplateRoot}}" maxlength="200" required>
+                                    <div class="form-text">
+                                        模板包解压根目录（按模板 code 建子目录），保存后立即切换并自动创建目录；
+                                        <span class="text-warning">原目录下的模板文件不自动迁移</span>，切换后需重新上传模板。
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="row align-items-center">
+                                <label class="col-sm-4 col-form-label col-form-label-sm fw-semibold">frps_helper 请求超时（秒）</label>
+                                <div class="col-sm-8">
+                                    <input type="number" class="form-control form-control-sm" name="frps_request_timeout"
+                                           value="{{.S.FrpsRequestTimeoutSec}}" min="1" max="300" required>
+                                    <div class="form-text">北向接口单请求超时，1-300 秒。</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="row align-items-center">
+                                <label class="col-sm-4 col-form-label col-form-label-sm fw-semibold">设备 RPC 超时（秒）</label>
+                                <div class="col-sm-8">
+                                    <input type="number" class="form-control form-control-sm" name="device_rpc_timeout"
+                                           value="{{.S.DeviceRpcTimeoutSec}}" min="1" max="300" required>
+                                    <div class="form-text">经 frp 隧道访问设备（lucirpc/ubus）的单请求超时，1-300 秒。</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="row align-items-center">
+                                <label class="col-sm-4 col-form-label col-form-label-sm fw-semibold">固件上传超时（秒）</label>
+                                <div class="col-sm-8">
+                                    <input type="number" class="form-control form-control-sm" name="device_rpc_upload_timeout"
+                                           value="{{.S.DeviceRpcUploadTimeoutSec}}" min="60" max="7200" required>
+                                    <div class="form-text">cgi-io 固件上传专用（大文件慢操作），60-7200 秒，须远大于设备 RPC 超时。</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="row align-items-center">
+                                <label class="col-sm-4 col-form-label col-form-label-sm fw-semibold">设备凭证缓存 TTL（秒）</label>
+                                <div class="col-sm-8">
+                                    <input type="number" class="form-control form-control-sm" name="device_rpc_token_cache_ttl"
+                                           value="{{.S.DeviceRpcTokenCacheTTLSec}}" min="30" max="86400" required>
+                                    <div class="form-text">设备 token / 登录凭证的内存缓存时长（仅内存、不落盘），30-86400 秒；作用于新写入的缓存条目。</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3 d-flex align-items-center gap-2">
+                        <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-floppy-disk me-1"></i> 保存并生效</button>
+                        <span class="text-muted">最后更新：{{.S.UpdatedAt.Format "2006-01-02 15:04:05"}}</span>
+                    </div>
+                </form>
+                {{else}}
+                <div class="text-muted small">设置表不可用，请检查数据库后刷新。</div>
+                {{end}}
+            </div>
+
+            <!-- TAB 2: RADIUS 服务 -->
+            <div class="tab-pane fade{{if eq .Tab "radius"}} show active{{end}}" id="pane-radius" role="tabpanel">
+                {{if .RadCfgErr}}<div class="alert alert-warning py-2 small"><i class="fas fa-triangle-exclamation me-1"></i>{{.RadCfgErr}}（请检查 frps_helper 管理接口配置与连通性）</div>{{end}}
+                {{if .RadCfg}}
+                <form method="post" action="/radius/service" id="radiusServiceForm">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <div class="border rounded p-2 h-100">
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="auth_enable" name="auth_enable" value="1" {{if .RadCfg.AuthEnable}}checked{{end}}>
+                                    <label class="form-check-label small fw-semibold" for="auth_enable">认证服务（Access-Request，UDP）</label>
+                                </div>
+                                <div class="row g-2">
+                                    <div class="col-12">
+                                        <div class="row align-items-center">
+                                            <label class="col-sm-4 col-form-label col-form-label-sm text-muted">监听地址 / 端口</label>
+                                            <div class="col-sm-8 d-flex gap-2">
+                                                <input type="text" class="form-control form-control-sm" name="auth_listen_addr" value="{{.RadCfg.AuthListenAddr}}" required placeholder="0.0.0.0" style="flex:1">
+                                                <input type="number" class="form-control form-control-sm" name="auth_listen_port" value="{{.RadCfg.AuthListenPort}}" required min="1" max="65535" style="width:90px">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-12">
+                                        <div class="row align-items-center">
+                                            <label class="col-sm-4 col-form-label col-form-label-sm text-muted">全局认证密钥</label>
+                                            <div class="col-sm-8">
+                                                <input type="text" class="form-control form-control-sm font-monospace" name="auth_secret" value="{{.RadCfg.AuthSecret}}" maxlength="128" autocomplete="off">
+                                                <div class="form-text">设备无独立密钥时回退使用；留空则拒绝认证</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-12">
+                                        <div class="row align-items-center">
+                                            <label class="col-sm-4 col-form-label col-form-label-sm text-muted">认证超时（秒）</label>
+                                            <div class="col-sm-8">
+                                                <input type="number" class="form-control form-control-sm" name="auth_timeout" value="{{.RadCfg.AuthTimeout}}" required min="1" max="3600">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="border rounded p-2 h-100">
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="acct_enable" name="acct_enable" value="1" {{if .RadCfg.AcctEnable}}checked{{end}}>
+                                    <label class="form-check-label small fw-semibold" for="acct_enable">记账服务（Accounting，UDP，纯会话记录）</label>
+                                </div>
+                                <div class="row g-2">
+                                    <div class="col-12">
+                                        <div class="row align-items-center">
+                                            <label class="col-sm-4 col-form-label col-form-label-sm text-muted">监听地址 / 端口</label>
+                                            <div class="col-sm-8 d-flex gap-2">
+                                                <input type="text" class="form-control form-control-sm" name="acct_listen_addr" value="{{.RadCfg.AcctListenAddr}}" required placeholder="0.0.0.0" style="flex:1">
+                                                <input type="number" class="form-control form-control-sm" name="acct_listen_port" value="{{.RadCfg.AcctListenPort}}" required min="1" max="65535" style="width:90px">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-12">
+                                        <div class="row align-items-center">
+                                            <label class="col-sm-4 col-form-label col-form-label-sm text-muted">全局记账密钥</label>
+                                            <div class="col-sm-8">
+                                                <input type="text" class="form-control form-control-sm font-monospace" name="acct_secret" value="{{.RadCfg.AcctSecret}}" maxlength="128" autocomplete="off">
+                                                <div class="form-text">留空回退认证密钥</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-12">
+                                        <div class="row align-items-center">
+                                            <label class="col-sm-4 col-form-label col-form-label-sm text-muted">记账超时（秒）</label>
+                                            <div class="col-sm-8">
+                                                <input type="number" class="form-control form-control-sm" name="acct_timeout" value="{{.RadCfg.AcctTimeout}}" required min="1" max="3600">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-12">
+                                        <div class="row align-items-center">
+                                            <label class="col-sm-4 col-form-label col-form-label-sm text-muted">会话超时（秒）</label>
+                                            <div class="col-sm-8">
+                                                <input type="number" class="form-control form-control-sm" name="acct_session_timeout" value="{{.RadCfg.AcctSessionTimeout}}" required min="1" max="86400">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-12">
+                                        <div class="row align-items-center">
+                                            <label class="col-sm-4 col-form-label col-form-label-sm text-muted">清理周期（秒）</label>
+                                            <div class="col-sm-8">
+                                                <input type="number" class="form-control form-control-sm" name="acct_cleanup_interval" value="{{.RadCfg.AcctCleanupInterval}}" required min="1" max="86400">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <div class="border rounded p-2">
+                                <div class="small fw-semibold mb-2 text-muted"><i class="fas fa-bullhorn me-1"></i> 设备接入宣告参数（设备 join 时写入设备参数；留空/0 回退默认值）</div>
+                                <div class="row align-items-center">
+                                    <label class="col-sm-3 col-form-label col-form-label-sm text-muted">宣告服务器地址</label>
+                                    <div class="col-sm-9">
+                                        <input type="text" class="form-control form-control-sm" name="advertised_server" value="{{.RadCfg.AdvertisedServer}}" placeholder="回退 {{.RadCfg.EffectiveServer}}">
+                                    </div>
+                                </div>
+                                <div class="row align-items-center mt-2">
+                                    <label class="col-sm-3 col-form-label col-form-label-sm text-muted">宣告认证 / 记账端口</label>
+                                    <div class="col-sm-9 d-flex gap-2">
+                                        <input type="number" class="form-control form-control-sm" name="advertised_auth_port" value="{{.RadCfg.AdvertisedAuthPort}}" min="0" max="65535" placeholder="认证端口" style="flex:1">
+                                        <input type="number" class="form-control form-control-sm" name="advertised_acct_port" value="{{.RadCfg.AdvertisedAcctPort}}" min="0" max="65535" placeholder="记账端口" style="flex:1">
+                                    </div>
+                                </div>
+                                <div class="small text-muted mt-2">当前生效：{{.RadCfg.EffectiveServer}} 认证 {{.RadCfg.EffectiveAuthPort}} / 记账 {{.RadCfg.EffectiveAcctPort}}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <button class="btn btn-primary btn-sm"><i class="fas fa-save me-1"></i> 保存并生效</button>
+                        <span class="small text-muted ms-2">修改监听地址/端口或开关会自动重启 RADIUS 服务；密钥/超时即时热生效。</span>
+                    </div>
+                </form>
+                {{end}}
+            </div>
+
+            <!-- TAB 3: 证书管理（数据来自 frps_helper 北向证书接口，经本服务代理） -->
+            <div class="tab-pane fade{{if eq .Tab "certs"}} show active{{end}}" id="pane-certs" role="tabpanel">
+                {{if .CertCfgErr}}<div class="alert alert-warning py-2 small"><i class="fas fa-triangle-exclamation me-1"></i>{{.CertCfgErr}}（请检查 frps_helper 管理接口配置与连通性）</div>{{end}}
+                {{if .CanCert}}
+                <div class="alert alert-light border py-2 small mb-3">
+                    <i class="fas fa-circle-info me-1"></i>
+                    证书内容直传（不上传文件），私钥不回显；保存后默认立即热生效。删除数据库记录后按优先级回退：
+                    配置文件 → 运行时自签（仅 https）→ 缺失（ca / server-auth 缺失会阻止重启）。
+                </div>
+                <div class="row g-3">
+                    {{range .CertCards}}
+                    <div class="col-xl-4 col-lg-6">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header d-flex justify-content-between align-items-center py-2">
+                                <span class="small fw-semibold"><i class="fas fa-certificate me-1"></i>{{.Label}}</span>
+                                <span>
+                                    {{if .Required}}<span class="badge bg-dark me-1">必需</span>{{end}}
+                                    <span class="badge bg-{{.StatusClass}}">{{.StatusLabel}}</span>
+                                </span>
+                            </div>
+                            <div class="card-body py-2">
+                                <div class="small text-muted mb-2">{{.Hint}}</div>
+                                <table class="table table-sm small mb-2">
+                                    <tbody>
+                                        <tr><th class="text-muted" style="width:74px">来源</th>
+                                            <td>{{.SourceLabel}}{{if .Version}} · v{{.Version}}{{end}}{{if not .HasKey}} · 无私钥{{end}}</td></tr>
+                                        <tr><th class="text-muted">主体</th><td class="text-break">{{if .Subject}}{{.Subject}}{{else}}-{{end}}</td></tr>
+                                        <tr><th class="text-muted">签发者</th><td class="text-break">{{if .Issuer}}{{.Issuer}}{{else}}-{{end}}</td></tr>
+                                        <tr><th class="text-muted">有效期</th>
+                                            <td>{{.NotAfter}}
+                                                {{if lt .DaysLeft 0}}<span class="badge bg-danger">已过期</span>
+                                                {{else if le .DaysLeft 30}}<span class="badge bg-warning text-dark">剩余 {{.DaysLeft}} 天</span>
+                                                {{else}}<span class="text-muted">（剩余 {{.DaysLeft}} 天）</span>{{end}}
+                                            </td></tr>
+                                        <tr><th class="text-muted">密钥</th><td>{{if .KeyType}}{{.KeyType}} {{.KeyBits}}{{else}}-{{end}}</td></tr>
+                                        <tr><th class="text-muted">指纹</th>
+                                            <td class="font-monospace text-break">{{if .Fingerprint}}{{trunc .Fingerprint 32}}{{else}}-{{end}}</td></tr>
+                                        {{if .SANs}}<tr><th class="text-muted">SAN</th><td class="text-break">{{.SANs}}</td></tr>{{end}}
+                                    </tbody>
+                                </table>
+                                {{range .Warnings}}
+                                <div class="alert alert-{{.Class}} py-1 px-2 small mb-1"><i class="fas fa-circle-info me-1"></i>{{.Label}}</div>
+                                {{end}}
+                                {{if .LastError}}
+                                <div class="alert alert-danger py-1 px-2 small mb-1"><i class="fas fa-triangle-exclamation me-1"></i>最近一次生效失败：{{.LastError}}</div>
+                                {{end}}
+                            </div>
+                            <div class="card-footer bg-white py-2 text-end">
+                                <button type="button" class="btn btn-outline-primary btn-sm" data-purpose="{{.Purpose}}" data-label="{{.Label}}" onclick="openCertModal(this.dataset.purpose, this.dataset.label)">
+                                    <i class="fas fa-pen-to-square me-1"></i> 管理
+                                </button>
+                                <button type="button" class="btn btn-outline-success btn-sm ms-1" onclick="applyCert('{{.Purpose}}')">
+                                    <i class="fas fa-bolt me-1"></i> 应用
+                                </button>
+                                <button type="button" class="btn btn-outline-danger btn-sm ms-1" onclick="deleteCert('{{.Purpose}}', '{{.Label}}')">
+                                    <i class="fas fa-trash me-1"></i> 删除
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    {{else}}
+                    <div class="col-12"><div class="alert alert-secondary py-2 small mb-0">暂无证书槽位数据</div></div>
+                    {{end}}
+                </div>
+
+                <!-- 变更备份：替换/删除/回滚/恢复前自动生成 -->
+                <div class="card shadow-sm mt-3">
+                    <div class="card-header d-flex flex-wrap justify-content-between align-items-center py-2">
+                        <span class="small fw-semibold"><i class="fas fa-clock-rotate-left me-1"></i>变更备份</span>
+                        <span class="d-flex align-items-center">
+                            <span class="small text-muted me-2">每次替换/删除/回滚/恢复前自动备份；每槽位最新一条只可恢复</span>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="loadBackups()">
+                                <i class="fas fa-rotate me-1"></i>刷新
+                            </button>
+                        </span>
+                    </div>
+                    <div class="card-body py-2">
+                        <div class="table-responsive" style="max-height:360px;overflow:auto">
+                            <table class="table table-sm small align-middle mb-0">
+                                <thead class="table-light sticky-top">
+                                    <tr><th>时间</th><th>槽位</th><th>来源/版本</th><th>主体</th><th>到期</th><th>触发</th><th>备注</th><th style="width:120px">操作</th></tr>
+                                </thead>
+                                <tbody id="certBackupBody">
+                                    <tr><td colspan="8" class="text-center text-muted py-3">加载中…</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                {{else}}
+                <div class="alert alert-secondary py-2 small mb-0">当前账号无证书管理权限（需要 cert:read）。</div>
+                {{end}}
+            </div>
+
+            <!-- TAB 4: 固件管理（上传固件并自动生成说明 JSON；按型号分组展示全部固件） -->
+            <div class="tab-pane fade{{if eq .Tab "firmware"}} show active{{end}}" id="pane-firmware" role="tabpanel">
+                {{if .CanFirmware}}
+                <div class="alert alert-light border py-2 small mb-3">
+                    <i class="fas fa-circle-info me-1"></i>
+                    固件按硬件型号分目录存放于 <code>{{.FirmwareRoot}}</code>。上传后自动生成同名说明 JSON：
+                    型号、版本（优先从文件名提取 vX.Y.Z）、发布日期（上传当天）、MD5、SHA-256 均自动生成，备注可手填。
+                    设备页「固件升级」只展示与设备硬件型号匹配的固件。单文件上限 {{.FirmwareMaxMB}} MB，同名固件不会被覆盖。
+                </div>
+                {{if .FirmwareErr}}<div class="alert alert-warning py-2 small"><i class="fas fa-triangle-exclamation me-1"></i>{{.FirmwareErr}}</div>{{end}}
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="small fw-semibold"><i class="fas fa-hard-drive me-1"></i> 固件库</span>
+                    <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#fwUploadModal" onclick="loadFwModels()">
+                        <i class="fas fa-upload me-1"></i> 上传固件
+                    </button>
+                </div>
+                {{range $g := .FirmwareList}}
+                <div class="card shadow-sm mb-3">
+                    <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+                        <span class="small fw-semibold"><i class="fas fa-microchip me-1"></i> 型号：{{$g.Model}}</span>
+                        <span class="small text-muted">目录 <code>{{$g.ModelDir}}</code> · 共 {{len $g.Entries}} 个</span>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover align-middle mb-0 small">
+                                <thead>
+                                    <tr class="table-light">
+                                        <th>文件名</th><th>版本</th><th>发布日期</th><th>大小</th><th>校验</th><th>备注</th><th style="width:270px;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                {{range $g.Entries}}
+                                    <tr>
+                                        <td><code>{{.Filename}}</code></td>
+                                        <td><span class="badge bg-primary">{{.Version}}</span></td>
+                                        <td>{{if .ReleaseDate}}{{.ReleaseDate}}{{else}}—{{end}}</td>
+                                        <td>{{fsize .SizeBytes}}</td>
+                                        <td>{{if .HasChecksum}}<span class="text-success"><i class="fas fa-check"></i></span>{{else}}<span class="text-muted">—</span>{{end}}</td>
+                                        <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{.Notes}}">{{if .Notes}}{{.Notes}}{{else}}—{{end}}</td>
+                                        <td class="text-nowrap">
+                                            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" data-fw-json="{{.DescJSON}}" data-fw-title="{{.Filename}}" onclick="showFwJson(this)"><i class="fas fa-code me-1"></i>JSON</button>
+                                            <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2 ms-1" data-model="{{$g.ModelDir}}" data-filename="{{.Filename}}" data-notes="{{.Notes}}" onclick="openFwNotes(this)"><i class="fas fa-pen me-1"></i>备注</button>
+                                            <a class="btn btn-outline-success btn-sm py-0 px-2 ms-1" href="/settings/firmware/download?model={{urlq $g.ModelDir}}&filename={{urlq .Filename}}"><i class="fas fa-download me-1"></i>下载</a>
+                                            <form method="post" action="/settings/firmware/delete" class="d-inline" onsubmit="return confirm('确认删除固件 {{.Filename}} 及其说明 JSON？删除后不可恢复。');">
+                                                <input type="hidden" name="model" value="{{$g.ModelDir}}">
+                                                <input type="hidden" name="filename" value="{{.Filename}}">
+                                                <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-2 ms-1"><i class="fas fa-trash me-1"></i>删除</button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                {{end}}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                {{else}}
+                <div class="alert alert-secondary py-3 small text-center mb-0">
+                    固件库暂无固件。点击右上角「上传固件」，上传后会按所选硬件型号自动归类并生成说明 JSON。
+                </div>
+                {{end}}
+                {{else}}
+                <div class="alert alert-secondary py-2 small mb-0">当前账号无固件管理权限（需要 firmware:read）。</div>
+                {{end}}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="certModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="fas fa-certificate me-1"></i><span id="certModalTitle">证书管理</span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="certAlert" class="d-none py-2 px-2 small"></div>
+                <div class="mb-2">
+                    <label class="form-label small text-muted mb-1">本次自动备份备注（可选，最多 200 字）</label>
+                    <input type="text" class="form-control form-control-sm" id="certBackupComment" maxlength="200" placeholder="例如：2026 年度轮换前备份">
+                </div>
+
+                <ul class="nav nav-tabs" id="certTabs" role="tablist">
+                    <li class="nav-item"><button class="nav-link py-1 small active" data-bs-toggle="tab" data-bs-target="#certTabCurrent" type="button">当前状态</button></li>
+                    <li class="nav-item"><button class="nav-link py-1 small" data-bs-toggle="tab" data-bs-target="#certTabImport" type="button">替换证书</button></li>
+                    <li class="nav-item" id="certGenTabLi"><button class="nav-link py-1 small" data-bs-toggle="tab" data-bs-target="#certTabGenerate" type="button">生成自签</button></li>
+                    <li class="nav-item"><button class="nav-link py-1 small" data-bs-toggle="tab" data-bs-target="#certTabHistory" type="button" id="certHistoryTabBtn">历史版本</button></li>
+                </ul>
+
+                <div class="tab-content pt-3">
+                    <!-- 当前状态 -->
+                    <div class="tab-pane fade show active" id="certTabCurrent">
+                        <table class="table table-sm small align-middle mb-2">
+                            <tbody id="certCurrentBody">
+                                <tr><td class="text-muted">加载中…</td></tr>
+                            </tbody>
+                        </table>
+                        <div class="d-flex flex-wrap gap-2">
+                            <button type="button" class="btn btn-outline-success btn-sm" onclick="applyCert(currentPurpose)">
+                                <i class="fas fa-bolt me-1"></i> 应用当前版本
+                            </button>
+                            <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteCert(currentPurpose, currentLabel)">
+                                <i class="fas fa-trash me-1"></i> 删除数据库记录（回退文件/自签）
+                            </button>
+                            <button type="button" class="btn btn-outline-warning btn-sm" id="clearPrevBtn" onclick="clearPreviousCA()">
+                                <i class="fas fa-eraser me-1"></i> 清除旧 CA 私钥
+                            </button>
+                        </div>
+                        <div class="small text-muted mt-2">
+                            删除后按优先级回退：配置文件 → 运行时自签（仅 https）→ 缺失（ca / server-auth 缺失会阻止重启）。
+                        </div>
+                    </div>
+
+                    <!-- 替换证书 -->
+                    <div class="tab-pane fade" id="certTabImport">
+                        <div class="alert alert-light border py-2 small">
+                            内容直传，不经过文件上传。私钥不回显，替换时请完整粘贴证书、证书链（可选）与私钥三份 PEM。
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small text-muted mb-1">证书 PEM（必填）</label>
+                            <textarea class="form-control form-control-sm font-monospace" id="certPemInput" rows="5" placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small text-muted mb-1">证书链 PEM（可选，中间 CA 按签发顺序）</label>
+                            <textarea class="form-control form-control-sm font-monospace" id="certChainInput" rows="3" placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small text-muted mb-1">私钥 PEM（必填，未加密）</label>
+                            <textarea class="form-control form-control-sm font-monospace" id="certKeyInput" rows="5" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small text-muted mb-1">备注</label>
+                            <input type="text" class="form-control form-control-sm" id="certCommentInput" maxlength="200" placeholder="例如：2026 年度轮换">
+                        </div>
+                        <div class="d-flex flex-wrap gap-3 align-items-center mb-2">
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input" type="checkbox" id="certApplyNow" checked>
+                                <label class="form-check-label small" for="certApplyNow">保存后立即热生效</label>
+                            </div>
+                            <div class="form-check form-switch mb-0" id="keepPrevWrap">
+                                <input class="form-check-input" type="checkbox" id="certKeepPrev" checked>
+                                <label class="form-check-label small" for="certKeepPrev">保留旧 CA 私钥用于历史密码解密</label>
+                            </div>
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input" type="checkbox" id="certForce">
+                                <label class="form-check-label small" for="certForce">强制（忽略加密密码保护/回退材料检查）</label>
+                            </div>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="validateCert()">
+                                <i class="fas fa-vial me-1"></i> 仅校验
+                            </button>
+                            <button type="button" class="btn btn-primary btn-sm" onclick="saveCert()">
+                                <i class="fas fa-floppy-disk me-1"></i> 保存
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 生成自签 -->
+                    <div class="tab-pane fade" id="certTabGenerate">
+                        <div class="alert alert-light border py-2 small">
+                            服务端生成自签材料（仅 ca / https）。生成结果只回填到「替换证书」表单，需手动点保存才会落库生效。
+                            ca 槽位必须使用 RSA 密钥。
+                        </div>
+                        <div class="row g-2">
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted mb-1">Common Name</label>
+                                <input type="text" class="form-control form-control-sm" id="genCN" placeholder="留空 = frps-helper-cert">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted mb-1">Organization（可选）</label>
+                                <input type="text" class="form-control form-control-sm" id="genOrg" placeholder="例如 Monkfish">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small text-muted mb-1">有效期（天）</label>
+                                <input type="number" class="form-control form-control-sm" id="genDays" value="365" min="1" max="3650">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small text-muted mb-1">密钥类型</label>
+                                <select class="form-select form-select-sm" id="genKeyType">
+                                    <option value="">默认（ca=rsa-2048 / https=ecdsa-p256）</option>
+                                    <option value="rsa-2048">RSA 2048</option>
+                                    <option value="rsa-3072">RSA 3072</option>
+                                    <option value="rsa-4096">RSA 4096</option>
+                                    <option value="ecdsa-p256">ECDSA P-256</option>
+                                    <option value="ecdsa-p384">ECDSA P-384</option>
+                                </select>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small text-muted mb-1">SAN（逗号或换行分隔，https 建议填服务域名/IP）</label>
+                                <textarea class="form-control form-control-sm font-monospace" id="genSANs" rows="2" placeholder="例如：192.168.1.1, frps.example.com"></textarea>
+                            </div>
+                        </div>
+                        <div class="mt-2">
+                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="generateCert()">
+                                <i class="fas fa-wand-magic-sparkles me-1"></i> 生成并回填
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 历史版本 -->
+                    <div class="tab-pane fade" id="certTabHistory">
+                        <div class="table-responsive" style="max-height:420px;overflow:auto">
+                            <table class="table table-sm small align-middle mb-0">
+                                <thead class="table-light sticky-top">
+                                    <tr><th>版本</th><th>主体</th><th>到期</th><th>备注</th><th>归档时间</th><th>指纹</th><th style="width:80px">操作</th></tr>
+                                </thead>
+                                <tbody id="certHistoryBody">
+                                    <tr><td colspan="7" class="text-center text-muted py-3">切换到此标签页后加载</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="small text-muted mt-2">回滚会把该版本内容重新保存为新版本（保留最近 10 个历史版本）。</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 固件管理：上传 -->
+<div class="modal fade" id="fwUploadModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <form method="post" action="/settings/firmware/upload" enctype="multipart/form-data" onsubmit="return fwUploadCheck(this);">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="fas fa-upload me-1"></i>上传固件</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body small">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="col-form-label col-form-label-sm fw-semibold">硬件型号 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control form-control-sm" name="model" id="fwModelInput" list="fwModelList" placeholder="例如 MonkFish AX835" maxlength="128" autocomplete="off" required>
+                            <datalist id="fwModelList"></datalist>
+                            <div class="form-text">下拉选项来自已注册设备与固件库已有型号，也可手动输入新型号。</div>
+                        </div>
+                        <div class="col-12">
+                            <label class="col-form-label col-form-label-sm fw-semibold">固件文件 <span class="text-danger">*</span></label>
+                            <input type="file" class="form-control form-control-sm" name="file" id="fwFileInput" required>
+                            <div class="form-text">单文件上限 {{.FirmwareMaxMB}} MB；文件名保留版本号（如 xxx-v1.2.3.bin），版本将自动提取。</div>
+                        </div>
+                        <div class="col-12">
+                            <label class="col-form-label col-form-label-sm fw-semibold">备注（可选）</label>
+                            <textarea class="form-control form-control-sm" name="notes" rows="3" maxlength="500" placeholder="发布说明 / 变更点 / 已知问题"></textarea>
+                            <div class="form-text">最多 500 字；保存后可在列表中继续编辑。</div>
+                        </div>
+                    </div>
+                    <div class="alert alert-light border py-2 mb-0 mt-3">
+                        <i class="fas fa-code me-1"></i> 说明 JSON 自动生成：model、version（来自文件名）、release_date（上传当天）、md5、sha256、notes。
+                    </div>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-upload me-1"></i>上传并生成 JSON</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 固件管理：编辑备注 -->
+<div class="modal fade" id="fwNotesModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="post" action="/settings/firmware/notes">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="fas fa-pen me-1"></i>编辑固件备注</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body small">
+                    <input type="hidden" name="model" id="fwNotesModel">
+                    <input type="hidden" name="filename" id="fwNotesFilename">
+                    <div class="mb-2"><span class="text-muted">固件：</span><code id="fwNotesTitle"></code></div>
+                    <label class="form-label fw-semibold">备注（最多 500 字）</label>
+                    <textarea class="form-control form-control-sm" name="notes" id="fwNotesInput" rows="4" maxlength="500" placeholder="发布说明 / 变更点 / 已知问题"></textarea>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save me-1"></i>保存备注</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 固件管理：查看 / 复制说明 JSON -->
+<div class="modal fade" id="fwJsonModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="fas fa-code me-1"></i><span id="fwJsonTitle">说明 JSON</span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <pre id="fwJsonText" class="small bg-light border rounded p-2 mb-0" style="max-height:50vh;overflow:auto;white-space:pre-wrap;"></pre>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-outline-primary btn-sm" onclick="copyFwJson()"><i class="fas fa-copy me-1"></i>复制</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+var currentPurpose = 'ca';
+var currentLabel = '';
+
+function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (ch) {
+        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+    });
+}
+
+function certApi(purpose, action, method, body) {
+    var url = '/certificates/api/purposes/' + encodeURIComponent(purpose) + (action ? '/' + action : '');
+    var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    return fetch(url, opts).then(function (r) { return r.json(); });
+}
+
+function certPrevApi(force) {
+    var q = [];
+    if (force) q.push('force=1');
+    var c = certBackupComment();
+    if (c) q.push('backup_comment=' + encodeURIComponent(c));
+    var qs = q.length ? '?' + q.join('&') : '';
+    return fetch('/certificates/api/previous-ca' + qs, { method: 'DELETE', headers: { 'Content-Type': 'application/json' } })
+        .then(function (r) { return r.json(); });
+}
+
+function showCertAlert(kind, html) {
+    var box = document.getElementById('certAlert');
+    box.className = 'alert alert-' + kind + ' py-2 px-2 small';
+    box.innerHTML = html;
+}
+
+function clearCertAlert() {
+    var box = document.getElementById('certAlert');
+    box.className = 'd-none';
+    box.innerHTML = '';
+}
+
+function issuesHtml(data) {
+    var out = '';
+    var errs = (data && data.errors) || [];
+    var warns = (data && data.warnings) || [];
+    if (errs.length) {
+        out += '<div class="fw-semibold mb-1">校验未通过：</div><ul class="mb-1 ps-3">';
+        errs.forEach(function (e) { out += '<li><code>' + esc(e.field) + '</code> ' + esc(e.message) + '（' + esc(e.code) + '）</li>'; });
+        out += '</ul>';
+    }
+    if (warns.length) {
+        out += '<div class="fw-semibold mb-1">告警：</div><ul class="mb-0 ps-3">';
+        warns.forEach(function (w) { out += '<li>' + esc(w) + '</li>'; });
+        out += '</ul>';
+    }
+    return out;
+}
+
+function collectPutBody() {
+    return {
+        cert_pem: document.getElementById('certPemInput').value,
+        chain_pem: document.getElementById('certChainInput').value,
+        key_pem: document.getElementById('certKeyInput').value,
+        comment: document.getElementById('certCommentInput').value.trim(),
+        backup_comment: certBackupComment(),
+        apply_now: document.getElementById('certApplyNow').checked,
+        keep_previous: document.getElementById('certKeepPrev').checked,
+        force: document.getElementById('certForce').checked
+    };
+}
+
+// 本次自动备份备注（操作前由用户填写，提交后清空）。
+function certBackupComment() {
+    var el = document.getElementById('certBackupComment');
+    return el ? el.value.trim() : '';
+}
+
+function resetCertBackupComment() {
+    var el = document.getElementById('certBackupComment');
+    if (el) el.value = '';
+}
+
+// 写操作成功后回到本页证书 TAB，避免落回 PORTAL 设置。
+function reloadCerts() {
+    location.href = '/settings?tab=certs';
+}
+
+window.openCertModal = function (purpose, label) {
+    currentPurpose = purpose;
+    currentLabel = label || purpose;
+    clearCertAlert();
+    resetCertBackupComment();
+    document.getElementById('certModalTitle').textContent = (label || purpose) + '（' + purpose + '）';
+    document.getElementById('certPemInput').value = '';
+    document.getElementById('certChainInput').value = '';
+    document.getElementById('certKeyInput').value = '';
+    document.getElementById('certCommentInput').value = '';
+    document.getElementById('certApplyNow').checked = true;
+    document.getElementById('certKeepPrev').checked = true;
+    document.getElementById('certForce').checked = false;
+    document.getElementById('keepPrevWrap').style.display = purpose === 'ca' ? '' : 'none';
+    document.getElementById('clearPrevBtn').style.display = purpose === 'ca' ? '' : 'none';
+    document.getElementById('certGenTabLi').style.display = (purpose === 'ca' || purpose === 'https') ? '' : 'none';
+    document.getElementById('certHistoryBody').innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">切换到此标签页后加载</td></tr>';
+    document.getElementById('certCurrentBody').innerHTML = '<tr><td class="text-muted">加载中…</td></tr>';
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('certModal')).show();
+    var firstTab = document.querySelector('[data-bs-target="#certTabCurrent"]');
+    if (firstTab) new bootstrap.Tab(firstTab).show();
+    loadCertDetail(purpose);
+};
+
+function loadCertDetail(purpose) {
+    fetch('/certificates/api/purposes/' + encodeURIComponent(purpose), { headers: { 'Content-Type': 'application/json' } })
+        .then(function (r) { return r.json(); })
+        .then(function (resp) {
+            if (resp.code !== 0) {
+                showCertAlert('warning', esc(resp.message || '读取详情失败'));
+                document.getElementById('certCurrentBody').innerHTML = '<tr><td class="text-muted">数据库暂无记录，当前使用文件/自签材料</td></tr>';
+                return;
+            }
+            var d = resp.data || {};
+            var m = d.meta || {};
+            document.getElementById('certPemInput').value = d.cert_pem || '';
+            document.getElementById('certChainInput').value = d.chain_pem || '';
+            document.getElementById('certCommentInput').value = m.comment || '';
+            var html = '';
+            html += '<tr><th class="text-muted" style="width:74px">来源</th><td>' + esc(m.source || '-') + ' · v' + esc(m.version || 0) + '</td></tr>';
+            html += '<tr><th class="text-muted">状态</th><td>' + esc(m.status || '-') + (m.applied_at ? '（' + esc(m.applied_at) + '）' : '') + '</td></tr>';
+            html += '<tr><th class="text-muted">主体</th><td class="text-break">' + esc(m.subject || '-') + '</td></tr>';
+            html += '<tr><th class="text-muted">签发者</th><td class="text-break">' + esc(m.issuer || '-') + '</td></tr>';
+            html += '<tr><th class="text-muted">有效期</th><td>' + esc(m.not_before || '-') + ' → ' + esc(m.not_after || '-') + '</td></tr>';
+            html += '<tr><th class="text-muted">密钥</th><td>' + esc(m.key_type || '-') + ' ' + esc(m.key_bits || '') + '</td></tr>';
+            html += '<tr><th class="text-muted">SAN</th><td class="text-break">' + esc((m.sans || []).join(', ') || '-') + '</td></tr>';
+            html += '<tr><th class="text-muted">指纹</th><td class="font-monospace text-break">' + esc(m.fingerprint_sha256 || '-') + '</td></tr>';
+            document.getElementById('certCurrentBody').innerHTML = html;
+            if (m.last_error) {
+                showCertAlert('danger', '最近一次生效失败：' + esc(m.last_error));
+            }
+        })
+        .catch(function (err) {
+            showCertAlert('danger', '读取详情失败：' + esc(err.message));
+        });
+}
+
+window.validateCert = function () {
+    clearCertAlert();
+    showCertAlert('info', '校验中…');
+    certApi(currentPurpose, 'validate', 'POST', collectPutBody()).then(function (resp) {
+        if (resp.code === 0) {
+            var d = resp.data || {};
+            var html = '<i class="fas fa-circle-check me-1"></i>校验通过';
+            if (d.parsed) {
+                html += '<div class="mt-1">主体：' + esc(d.parsed.subject) + '；到期：' + esc(d.parsed.not_after) + '；密钥：' + esc(d.parsed.key_type) + ' ' + esc(d.parsed.key_bits) + '</div>';
+            }
+            html += issuesHtml(d);
+            showCertAlert('success', html);
+        } else {
+            showCertAlert('danger', esc(resp.message || '校验失败') + issuesHtml(resp.data || {}));
+        }
+    }).catch(function (err) { showCertAlert('danger', '请求失败：' + esc(err.message)); });
+};
+
+window.saveCert = function () {
+    clearCertAlert();
+    var body = collectPutBody();
+    if (!body.cert_pem.trim() || !body.key_pem.trim()) {
+        showCertAlert('danger', '证书与私钥均为必填');
+        return;
+    }
+    doSaveCert(body, false);
+};
+
+function doSaveCert(body, retried) {
+    showCertAlert('info', '保存中…');
+    certApi(currentPurpose, '', 'PUT', body).then(function (resp) {
+        if (resp.code === 0) {
+            var d = resp.data || {};
+            var html = '<i class="fas fa-circle-check me-1"></i>已保存 v' + esc(d.version || '') + (d.applied ? '，已热生效' : '，未生效（可点「应用」）');
+            if ((d.warnings || []).length) html += issuesHtml({ warnings: d.warnings });
+            showCertAlert('success', html);
+            setTimeout(reloadCerts, 800);
+            return;
+        }
+        if (!retried && resp.code === -1007) {
+            var aff = (resp.data && resp.data.affected_credentials) || 0;
+            if (confirm(esc(resp.message) + '\n受影响设备密码：' + aff + '\n仍要强制继续？')) {
+                body.force = true;
+                doSaveCert(body, true);
+                return;
+            }
+        }
+        showCertAlert('danger', esc(resp.message || '保存失败') + issuesHtml(resp.data || {}));
+    }).catch(function (err) { showCertAlert('danger', '请求失败：' + esc(err.message)); });
+}
+
+window.applyCert = function (purpose) {
+    clearCertAlert();
+    showCertAlert('info', '应用中…');
+    certApi(purpose, 'apply', 'POST').then(function (resp) {
+        if (resp.code === 0) {
+            showCertAlert('success', '<i class="fas fa-circle-check me-1"></i>已应用 v' + esc((resp.data || {}).version || '') + '，热生效完成');
+            setTimeout(reloadCerts, 800);
+        } else {
+            showCertAlert('danger', esc(resp.message || '应用失败') + issuesHtml(resp.data || {}));
+        }
+    }).catch(function (err) { showCertAlert('danger', '请求失败：' + esc(err.message)); });
+};
+
+window.deleteCert = function (purpose, label) {
+    if (!confirm('确认删除「' + (label || purpose) + '」的数据库记录？\n删除后将回退到配置文件 / 运行时自签，缺失时可能导致该槽位不可用。')) return;
+    deleteCertDo(purpose, false);
+};
+
+function deleteCertDo(purpose, retried) {
+    var q = [];
+    if (retried) q.push('force=1');
+    var c = certBackupComment();
+    if (c) q.push('backup_comment=' + encodeURIComponent(c));
+    var qs = q.length ? '?' + q.join('&') : '';
+    fetch('/certificates/api/purposes/' + encodeURIComponent(purpose) + qs, {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' }
+    }).then(function (r) { return r.json(); }).then(function (resp) {
+        if (resp.code === 0) {
+            var d = resp.data || {};
+            showCertAlert('success', '<i class="fas fa-circle-check me-1"></i>已删除，当前来源：' + esc(d.source || '-') + '（' + esc(d.status || '-') + '）');
+            if (d.fallback_error) showCertAlert('warning', '已删除，但回退失败：' + esc(d.fallback_error));
+            setTimeout(reloadCerts, 800);
+            return;
+        }
+        if (!retried && resp.code === -1007) {
+            var aff = (resp.data && resp.data.affected_credentials) || 0;
+            if (confirm(esc(resp.message) + '\n受影响设备密码：' + aff + '\n仍要强制删除？')) {
+                deleteCertDo(purpose, true);
+                return;
+            }
+        }
+        showCertAlert('danger', esc(resp.message || '删除失败'));
+    }).catch(function (err) { showCertAlert('danger', '请求失败：' + esc(err.message)); });
+}
+
+window.clearPreviousCA = function () {
+    if (!confirm('确认清除 CA 轮换保留的旧私钥？\n使用旧 CA 公钥加密的历史设备密码将无法解密。')) return;
+    clearPrevDo(false);
+};
+
+function clearPrevDo(retried) {
+    certPrevApi(retried).then(function (resp) {
+        if (resp.code === 0) {
+            showCertAlert('success', '<i class="fas fa-circle-check me-1"></i>旧 CA 私钥已清除（受影响设备密码：' + esc((resp.data || {}).affected_credentials || 0) + '）');
+            return;
+        }
+        if (!retried && resp.code === -1007) {
+            var aff = (resp.data && resp.data.affected_credentials) || 0;
+            if (confirm(esc(resp.message) + '\n受影响设备密码：' + aff + '\n仍要强制清除？')) {
+                clearPrevDo(true);
+                return;
+            }
+        }
+        showCertAlert('danger', esc(resp.message || '清除失败'));
+    }).catch(function (err) { showCertAlert('danger', '请求失败：' + esc(err.message)); });
+}
+
+window.generateCert = function () {
+    clearCertAlert();
+    var sans = document.getElementById('genSANs').value.split(/[\s,]+/).map(function (s) { return s.trim(); }).filter(function (s) { return s; });
+    var body = {
+        common_name: document.getElementById('genCN').value.trim(),
+        organization: document.getElementById('genOrg').value.trim(),
+        days: parseInt(document.getElementById('genDays').value, 10) || 365,
+        key_type: document.getElementById('genKeyType').value,
+        sans: sans
+    };
+    if (body.key_type === '' && currentPurpose === 'ca') body.key_type = 'rsa-2048';
+    showCertAlert('info', '生成中…');
+    certApi(currentPurpose, 'generate', 'POST', body).then(function (resp) {
+        if (resp.code === 0) {
+            var d = resp.data || {};
+            document.getElementById('certPemInput').value = d.cert_pem || '';
+            document.getElementById('certChainInput').value = d.chain_pem || '';
+            document.getElementById('certKeyInput').value = d.key_pem || '';
+            var html = '<i class="fas fa-circle-check me-1"></i>已生成，内容已回填到「替换证书」表单，请确认后点保存';
+            if ((d.warnings || []).length) html += issuesHtml({ warnings: d.warnings });
+            showCertAlert('success', html);
+            var btn = document.querySelector('[data-bs-target="#certTabImport"]');
+            if (btn) new bootstrap.Tab(btn).show();
+        } else {
+            showCertAlert('danger', esc(resp.message || '生成失败') + issuesHtml(resp.data || {}));
+        }
+    }).catch(function (err) { showCertAlert('danger', '请求失败：' + esc(err.message)); });
+};
+
+function loadCertVersions() {
+    var body = document.getElementById('certHistoryBody');
+    body.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">加载中…</td></tr>';
+    certApi(currentPurpose, 'versions', 'GET').then(function (resp) {
+        if (resp.code !== 0) {
+            body.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-3">加载失败：' + esc(resp.message || '') + '</td></tr>';
+            return;
+        }
+        var items = (resp.data && resp.data.items) || [];
+        if (!items.length) {
+            body.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">暂无历史版本</td></tr>';
+            return;
+        }
+        body.innerHTML = items.map(function (v) {
+            return '<tr>' +
+                '<td>v' + esc(v.version) + '</td>' +
+                '<td class="text-break">' + esc(v.subject || '-') + '</td>' +
+                '<td>' + esc(v.not_after || '-') + '</td>' +
+                '<td>' + esc(v.comment || '-') + '</td>' +
+                '<td>' + esc(v.created_at || '-') + '</td>' +
+                '<td class="font-monospace text-break">' + esc((v.fingerprint_sha256 || '').slice(0, 24)) + '…</td>' +
+                '<td><button type="button" class="btn btn-outline-warning btn-sm py-0 px-1" onclick="rollbackCert(' + Number(v.version) + ')">回滚</button></td>' +
+                '</tr>';
+        }).join('');
+    }).catch(function (err) {
+        body.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-3">加载失败：' + esc(err.message) + '</td></tr>';
+    });
+}
+
+window.rollbackCert = function (version) {
+    if (!confirm('确认回滚到 v' + version + '？该内容会作为新版本重新保存并热生效。')) return;
+    rollbackDo(version, false);
+};
+
+function rollbackDo(version, retried) {
+    certApi(currentPurpose, 'rollback', 'POST', {
+        version: version, apply_now: true, force: retried, backup_comment: certBackupComment()
+    }).then(function (resp) {
+        if (resp.code === 0) {
+            showCertAlert('success', '<i class="fas fa-circle-check me-1"></i>已回滚并生效，新版本 v' + esc((resp.data || {}).version || ''));
+            setTimeout(reloadCerts, 800);
+            return;
+        }
+        if (!retried && resp.code === -1007) {
+            var aff = (resp.data && resp.data.affected_credentials) || 0;
+            if (confirm(esc(resp.message) + '\n受影响设备密码：' + aff + '\n仍要强制回滚？')) {
+                rollbackDo(version, true);
+                return;
+            }
+        }
+        showCertAlert('danger', esc(resp.message || '回滚失败') + issuesHtml(resp.data || {}));
+    }).catch(function (err) { showCertAlert('danger', '请求失败：' + esc(err.message)); });
+}
+
+document.getElementById('certHistoryTabBtn').addEventListener('shown.bs.tab', function () {
+    loadCertVersions();
+});
+
+// ---------- 变更备份 ----------
+
+var backupPurposeLabels = {
+    'ca': '设备密码加密 CA',
+    'server-auth': '双向认证服务器证书',
+    'https': 'HTTPS 服务证书',
+    'ca-previous': '旧 CA 私钥'
+};
+var backupTriggerLabels = {
+    'put': '替换前',
+    'delete': '删除前',
+    'rollback': '回滚前',
+    'restore': '恢复前',
+    'clear_previous_ca': '清除旧CA前'
+};
+var backupSourceLabels = {
+    'db': '数据库',
+    'file': '配置文件',
+    'generated': '运行时自签',
+    'none': '缺失'
+};
+
+function backupPurposeLabel(p) { return backupPurposeLabels[p] || p; }
+// RFC3339 → "YYYY-MM-DD HH:MM"（本地时区）；空值返回 "-"。
+function backupTime(s) {
+    if (!s) return '-';
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return s;
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+function backupTriggerLabel(t) { return backupTriggerLabels[t] || t || '-'; }
+function backupSourceLabel(s) { return backupSourceLabels[s] || s || '-'; }
+
+function loadBackups() {
+    var body = document.getElementById('certBackupBody');
+    if (!body) return;
+    body.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">加载中…</td></tr>';
+    fetch('/certificates/api/backups?page_size=100', { headers: { 'Content-Type': 'application/json' } })
+        .then(function (r) { return r.json(); })
+        .then(function (resp) {
+            if (resp.code !== 0) {
+                body.innerHTML = '<tr><td colspan="8" class="text-center text-danger py-3">加载失败：' + esc(resp.message || '') + '</td></tr>';
+                return;
+            }
+            var items = (resp.data && resp.data.items) || [];
+            if (!items.length) {
+                body.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">暂无备份（执行替换/删除/回滚/恢复时自动生成）</td></tr>';
+                return;
+            }
+            body.innerHTML = items.map(function (b) {
+                var src = backupSourceLabel(b.source) + (b.version ? ' · v' + b.version : '');
+                var delBtn = b.protected
+                    ? '<button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ms-1" disabled title="每槽位最新一条备份不可删除">删除</button>'
+                    : '<button type="button" class="btn btn-outline-danger btn-sm py-0 px-1 ms-1" onclick="deleteBackup(' + b.id + ', false)">删除</button>';
+                return '<tr>' +
+                    '<td>' + esc(backupTime(b.created_at)) + '</td>' +
+                    '<td>' + esc(backupPurposeLabel(b.purpose)) + '</td>' +
+                    '<td>' + esc(src) + '</td>' +
+                    '<td class="text-break">' + esc(b.subject || '-') + '</td>' +
+                    '<td>' + esc(backupTime(b.not_after)) + '</td>' +
+                    '<td>' + esc(backupTriggerLabel(b.trigger)) + '</td>' +
+                    '<td class="text-break">' + esc(b.comment || '-') + '</td>' +
+                    '<td class="text-nowrap">' +
+                    '<button type="button" class="btn btn-outline-warning btn-sm py-0 px-1" onclick="restoreBackup(' + b.id + ', \'' + esc(backupPurposeLabel(b.purpose)) + '\')">恢复</button>' +
+                    delBtn +
+                    '</td>' +
+                    '</tr>';
+            }).join('');
+        })
+        .catch(function (err) {
+            body.innerHTML = '<tr><td colspan="8" class="text-center text-danger py-3">加载失败：' + esc(err.message) + '</td></tr>';
+        });
+}
+
+window.restoreBackup = function (id, label) {
+    var comment = prompt('恢复「' + (label || id) + '」前的自动备份备注（可留空）：', '');
+    if (comment === null) return;
+    if (!confirm('确认恢复到备份 #' + id + '？\n当前证书/CA 会先自动生成一条新备份，然后回写并热生效。')) return;
+    fetch('/certificates/api/backups/' + id + '/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ backup_comment: comment.trim(), apply_now: true })
+    }).then(function (r) { return r.json(); }).then(function (resp) {
+        if (resp.code === 0) {
+            var d = resp.data || {};
+            alert('已恢复备份 #' + id + (d.version ? '，新版本 v' + d.version : '') + (d.applied === false ? '（未生效，可在卡片点「应用」）' : '，已热生效'));
+            location.href = '/settings?tab=certs';
+            return;
+        }
+        if (resp.code === -1007 && confirm(esc(resp.message) + '\n仍要强制恢复？')) {
+            fetch('/certificates/api/backups/' + id + '/restore', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ backup_comment: comment.trim(), apply_now: true, force: true })
+            }).then(function (r) { return r.json(); }).then(function (r2) {
+                if (r2.code === 0) {
+                    location.href = '/settings?tab=certs';
+                } else {
+                    alert('恢复失败：' + (r2.message || ''));
+                }
+            });
+            return;
+        }
+        alert('恢复失败：' + (resp.message || ''));
+    }).catch(function (err) { alert('恢复失败：' + err.message); });
+};
+
+window.deleteBackup = function (id, protectedFlag) {
+    if (protectedFlag) {
+        alert('每个槽位最新一条备份不可删除，只能恢复。');
+        return;
+    }
+    if (!confirm('确认删除备份 #' + id + '？删除后无法再恢复该备份。')) return;
+    fetch('/certificates/api/backups/' + id, { method: 'DELETE', headers: { 'Content-Type': 'application/json' } })
+        .then(function (r) { return r.json(); })
+        .then(function (resp) {
+            if (resp.code === 0) {
+                loadBackups();
+                return;
+            }
+            if (resp.code === -1007) {
+                alert(resp.message || '最新备份不可删除，只能恢复');
+                return;
+            }
+            alert('删除失败：' + (resp.message || ''));
+        })
+        .catch(function (err) { alert('删除失败：' + err.message); });
+};
+
+document.getElementById('tab-certs').addEventListener('shown.bs.tab', loadBackups);
+if (document.getElementById('pane-certs').classList.contains('active')) {
+    loadBackups();
+}
+
+// ===== 固件管理 TAB =====
+var fwModelsLoaded = false;
+
+// 型号下拉按需加载：固件库已有型号 + 已注册设备型号。
+function loadFwModels() {
+    if (fwModelsLoaded) return;
+    fwModelsLoaded = true;
+    fetch('/settings/firmware/models', { headers: { 'Accept': 'application/json' } })
+        .then(function (r) { return r.json(); })
+        .then(function (resp) {
+            var dl = document.getElementById('fwModelList');
+            if (!dl) return;
+            dl.innerHTML = '';
+            (resp.models || []).forEach(function (m) {
+                var opt = document.createElement('option');
+                opt.value = m;
+                dl.appendChild(opt);
+            });
+        })
+        .catch(function () {
+            // 拉取失败不影响手动输入型号
+            fwModelsLoaded = false;
+        });
+}
+
+window.showFwJson = function (btn) {
+    var title = btn.getAttribute('data-fw-title') || '';
+    var text = btn.getAttribute('data-fw-json') || '{}';
+    document.getElementById('fwJsonTitle').textContent = '说明 JSON' + (title ? ' · ' + title : '');
+    document.getElementById('fwJsonText').textContent = text;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('fwJsonModal')).show();
+};
+
+window.copyFwJson = function () {
+    var text = document.getElementById('fwJsonText').textContent || '';
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () {
+            alert('已复制到剪贴板');
+        }, function () {
+            alert('复制失败，请手动选择文本复制');
+        });
+        return;
+    }
+    alert('当前浏览器不支持一键复制，请手动选择文本复制');
+};
+
+window.openFwNotes = function (btn) {
+    document.getElementById('fwNotesModel').value = btn.getAttribute('data-model') || '';
+    document.getElementById('fwNotesFilename').value = btn.getAttribute('data-filename') || '';
+    document.getElementById('fwNotesTitle').textContent = btn.getAttribute('data-filename') || '';
+    document.getElementById('fwNotesInput').value = btn.getAttribute('data-notes') || '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('fwNotesModal')).show();
+};
+
+window.fwUploadCheck = function (form) {
+    var model = form.querySelector('[name="model"]');
+    if (!model || !model.value.trim()) {
+        alert('请填写硬件型号');
+        return false;
+    }
+    var file = form.querySelector('[name="file"]');
+    if (!file || !file.files || !file.files.length) {
+        alert('请选择固件文件');
+        return false;
+    }
+    var btn = form.querySelector('button[type="submit"]');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>上传中…';
+    }
+    return true;
+};
+
+document.getElementById('tab-firmware').addEventListener('shown.bs.tab', loadFwModels);
+if (document.getElementById('pane-firmware').classList.contains('active')) {
+    loadFwModels();
+}
+</script>
+{{end}}

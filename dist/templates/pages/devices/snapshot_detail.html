@@ -1,0 +1,40 @@
+{{define "content"}}
+<div class="card rounded shadow-sm mb-3">
+    <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+        <span class="small fw-semibold">
+            <i class="fas fa-file-code me-1"></i> 快照详情 — {{.Device.DeviceName}}（{{.Device.DeviceID}}）
+        </span>
+        <div>
+            <a href="/devices/{{.Device.DeviceID}}/config/snapshots/{{.Snapshot.SnapshotID}}/download" class="btn btn-success btn-sm">
+                <i class="fas fa-download"></i> 下载 JSON
+            </a>
+            <a href="/devices/{{.Device.DeviceID}}/config/snapshots" class="btn btn-outline-secondary btn-sm">返回列表</a>
+        </div>
+    </div>
+    <div class="card-body py-2 small">
+        <div class="row g-2">
+            <div class="col-md-3"><span class="text-muted">快照编号：</span><code>{{.Snapshot.SnapshotID}}</code></div>
+            <div class="col-md-2"><span class="text-muted">采集时间：</span>{{tFmt .Snapshot.CapturedAt}}</div>
+            <div class="col-md-2"><span class="text-muted">来源：</span>{{.SourceLabel .Snapshot.Source}}</div>
+            <div class="col-md-2"><span class="text-muted">大小：</span>{{.Snapshot.Size}} B</div>
+            <div class="col-md-3"><span class="text-muted">SHA-256：</span><code title="{{.Snapshot.SHA256}}">{{trunc .Snapshot.SHA256 16}}</code></div>
+        </div>
+        {{if .PackageRows}}
+        <div class="mt-2 text-muted">
+            配置包（{{len .PackageRows}}）：
+            {{range .PackageRows}}<span class="badge bg-light text-dark border">{{.Name}}（{{.Sections}}）</span> {{end}}
+        </div>
+        {{end}}
+        <div class="mt-1 text-muted">密钥字段已掩码为 <code>******</code>；此快照仅用于存档/查看/下载与手工恢复参考。</div>
+    </div>
+</div>
+
+<div class="card rounded shadow-sm">
+    <div class="card-header bg-white py-2">
+        <span class="small fw-semibold"><i class="fas fa-code me-1"></i> 快照内容（JSON）</span>
+    </div>
+    <div class="card-body p-2">
+        <pre class="mb-0 small" style="max-height:70vh;overflow:auto;background:#f8f9fa;padding:10px;border-radius:4px;">{{.PrettyJSON}}</pre>
+    </div>
+</div>
+{{end}}

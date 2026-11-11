@@ -8,9 +8,15 @@
 <div class="alert alert-warning py-2 small mb-2"><i class="fas fa-exclamation-triangle me-1"></i> 实时信息拉取失败：{{.RPCError}}（已使用降级值）</div>
 {{end}}
 
+{{if .FlashOK}}<div class="alert alert-success alert-dismissible fade show py-2 small">{{.FlashOK}}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{{end}}
+{{if .FlashErr}}<div class="alert alert-danger alert-dismissible fade show py-2 small">{{.FlashErr}}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{{end}}
+
 <ul class="nav nav-tabs mb-2" role="tablist">
     <li class="nav-item" role="presentation">
         <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-basic" type="button" role="tab"><i class="fas fa-info-circle me-1"></i> 基础信息</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-radius" type="button" role="tab"><i class="fas fa-key me-1"></i> RADIUS 参数</button>
     </li>
     <li class="nav-item" role="presentation">
         <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-nic" type="button" role="tab"><i class="fas fa-network-wired me-1"></i> 网络接口 <span class="badge bg-secondary">{{len .NetDevs}}</span></button>
@@ -40,6 +46,61 @@
                         <tr><th class="table-light">首次发现</th><td>{{tFmt .Device.FirstSeen}}</td></tr>
                     </tbody>
                 </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="tab-pane fade" id="tab-radius" role="tabpanel">
+        <div class="card shadow-sm mb-3">
+            <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+                <span class="small fw-semibold"><i class="fas fa-key me-1"></i> 每设备 RADIUS 对接参数</span>
+                <span class="small text-muted">认证源选择「设备凭证」时，设备以本机凭证对接此处的 RADIUS 服务器</span>
+            </div>
+            <div class="card-body">
+                <form method="post" action="/devices/{{.Device.DeviceID}}/radius">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <div class="border rounded p-2 h-100">
+                                <div class="small fw-semibold mb-2">认证（Access）</div>
+                                <div class="row g-2">
+                                    <div class="col-8"><label class="form-label mb-0 small text-muted">服务器地址（清空则移除）</label>
+                                        <input type="text" class="form-control form-control-sm" name="rad_auth_server" value="{{if .Rad}}{{.Rad.RadAuthServer}}{{end}}"></div>
+                                    <div class="col-4"><label class="form-label mb-0 small text-muted">端口</label>
+                                        <input type="number" class="form-control form-control-sm" name="rad_auth_port" min="0" max="65535" value="{{if .Rad}}{{.Rad.RadAuthPort}}{{else}}0{{end}}"></div>
+                                    <div class="col-12"><label class="form-label mb-0 small text-muted">NAS IP（可清空）</label>
+                                        <input type="text" class="form-control form-control-sm" name="rad_nas_ip" value="{{if .Rad}}{{.Rad.RadNasIP}}{{end}}"></div>
+                                    <div class="col-12"><label class="form-label mb-0 small text-muted">认证密钥（24 位字母数字）</label>
+                                        <input type="text" class="form-control form-control-sm font-monospace" name="rad_auth_secret" maxlength="24" autocomplete="off" value="{{if .Rad}}{{.Rad.RadAuthSecret}}{{end}}"></div>
+                                    <div class="col-12 form-check ms-2">
+                                        <input class="form-check-input" type="checkbox" name="regen_auth_secret" value="1" id="regen_auth">
+                                        <label class="form-check-label small" for="regen_auth">重新生成认证密钥</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="border rounded p-2 h-100">
+                                <div class="small fw-semibold mb-2">记账（Accounting）</div>
+                                <div class="row g-2">
+                                    <div class="col-8"><label class="form-label mb-0 small text-muted">服务器地址（清空则移除）</label>
+                                        <input type="text" class="form-control form-control-sm" name="rad_acct_server" value="{{if .Rad}}{{.Rad.RadAcctServer}}{{end}}"></div>
+                                    <div class="col-4"><label class="form-label mb-0 small text-muted">端口</label>
+                                        <input type="number" class="form-control form-control-sm" name="rad_acct_port" min="0" max="65535" value="{{if .Rad}}{{.Rad.RadAcctPort}}{{else}}0{{end}}"></div>
+                                    <div class="col-12"><label class="form-label mb-0 small text-muted">记账密钥（24 位字母数字）</label>
+                                        <input type="text" class="form-control form-control-sm font-monospace" name="rad_acct_secret" maxlength="24" autocomplete="off" value="{{if .Rad}}{{.Rad.RadAcctSecret}}{{end}}"></div>
+                                    <div class="col-12 form-check ms-2">
+                                        <input class="form-check-input" type="checkbox" name="regen_acct_secret" value="1" id="regen_acct">
+                                        <label class="form-check-label small" for="regen_acct">重新生成记账密钥</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="small text-muted mt-2">清空服务器/端口并保存后，设备下次 join 会按「RADIUS 服务」页的宣告配置重新填充。</div>
+                    <div class="mt-2">
+                        <button class="btn btn-primary btn-sm"><i class="fas fa-save me-1"></i> 保存 RADIUS 参数</button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>

@@ -7,6 +7,7 @@ package server
 import (
 	"fmt"
 	"log/slog"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -15,6 +16,7 @@ import (
 	"wrthub-ui/internal/firmware"
 	"wrthub-ui/internal/frpsclient"
 	"wrthub-ui/internal/lucirpc"
+	"wrthub-ui/internal/portal"
 	"wrthub-ui/internal/render"
 	"wrthub-ui/internal/service"
 	"wrthub-ui/internal/store"
@@ -25,17 +27,19 @@ import (
 // RPC（LuCI RPC）是默认访问通道，Ubus（UBUS JSON-RPC）作为 RPC 失败时的兜底，
 // 两者复用同一 CredentialProvider 与并发限流配置。
 type App struct {
-	Cfg      *config.Config
-	Log      *slog.Logger
-	DB       *gorm.DB
-	Auth     auth.Authenticator
-	Frps     *frpsclient.Client
-	RPC      *lucirpc.Client
-	Ubus     *ubusrpc.Client
-	CredProv *service.CredentialProvider
-	Render   *render.Renderer
-	Wireless *service.Wireless
-	Firmware *firmware.Store
+	Cfg         *config.Config
+	Log         *slog.Logger
+	DB          *gorm.DB
+	Auth        auth.Authenticator
+	Frps        *frpsclient.Client
+	RPC         *lucirpc.Client
+	Ubus        *ubusrpc.Client
+	CredProv    *service.CredentialProvider
+	Render      *render.Renderer
+	Wireless    *service.Wireless
+	Firmware    *firmware.Store
+	PortalStore *portal.Store
+	StartedAt   time.Time // 进程启动时间（概况页服务状态展示）
 }
 
 // New 装配所有依赖：打开 DB、初始化管理员、构造 frps_helper / 凭证 / LuCI RPC client、选择认证 provider。
@@ -51,12 +55,36 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("seed rbac: %w", err)
 	}
 
+	// 业务配置分层：settings 表（DB 覆盖层）优先于 config.yaml（文件默认层）。
+	// 表为空时把文件配置种子进表；此后「系统设置」页只读写 DB，文件对应项改动不再生效。
+	seeded, err := store.SeedSettings(db, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("seed settings: %w", err)
+	}
+	if seeded {
+		log.Info("settings seeded from config.yaml into database")
+	}
+	if s, err := store.LoadSettings(db); err != nil {
+		log.Warn("load settings from db failed, fallback to file config", "err", err)
+	} else if s != nil {
+		s.ApplyToConfig(cfg)
+		if !seeded {
+			log.Info("settings loaded from database (overrides config.yaml)")
+		}
+	}
+
 	frpc := frpsclient.New(frpsclient.Options{
 		BaseURL:     cfg.FrpsHelper.BaseURL,
 		TLSInsecure: cfg.FrpsHelper.TLSInsecure,
 		Timeout:     cfg.FrpsHelper.RequestTimeout,
 	})
 	credProv := service.NewCredentialProvider(frpc, 0, cfg.DeviceRpc.TokenCacheTTL)
+	hostResolver := service.NewDeviceTargetResolver(frpc, service.DeviceTargetOptions{
+		Scheme:       cfg.DeviceRpc.Scheme,
+		DomainSuffix: cfg.DeviceRpc.DomainSuffix,
+		TunnelPort:   cfg.DeviceRpc.Port,
+		DirectPort:   cfg.DeviceRpc.DirectPort,
+	}, log)
 	rpcClient := lucirpc.New(lucirpc.Options{
 		Scheme:         cfg.DeviceRpc.Scheme,
 		DomainSuffix:   cfg.DeviceRpc.DomainSuffix,
@@ -66,6 +94,7 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		TokenCacheTTL:  cfg.DeviceRpc.TokenCacheTTL,
 		Timeout:        cfg.DeviceRpc.Timeout,
 		MaxConcurrency: cfg.DeviceRpc.MaxConcurrency,
+		HostResolver:   hostResolver,
 	}, credProv, log)
 	ubusClient := ubusrpc.New(ubusrpc.Options{
 		Scheme:         cfg.DeviceRpc.Scheme,
@@ -89,17 +118,27 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("init renderer: %w", err)
 	}
 
+	portalStore, err := portal.NewStore(cfg.Portal.TemplateRoot)
+	if err != nil {
+		return nil, fmt.Errorf("init portal store: %w", err)
+	}
+	if err := seedPortalExamples(db, portalStore, log); err != nil {
+		return nil, fmt.Errorf("seed portal examples: %w", err)
+	}
+
 	return &App{
-		Cfg:      cfg,
-		Log:      log,
-		DB:       db,
-		Auth:     authProv,
-		Frps:     frpc,
-		RPC:      rpcClient,
-		Ubus:     ubusClient,
-		CredProv: credProv,
-		Render:   renderer,
-		Wireless: service.NewWireless(ubusClient, log),
-		Firmware: firmware.NewStore(cfg.Firmware.Root, cfg.Firmware.MaxSizeMB),
+		Cfg:         cfg,
+		Log:         log,
+		DB:          db,
+		Auth:        authProv,
+		Frps:        frpc,
+		RPC:         rpcClient,
+		Ubus:        ubusClient,
+		CredProv:    credProv,
+		Render:      renderer,
+		Wireless:    service.NewWireless(ubusClient, log),
+		Firmware:    firmware.NewStore(cfg.Firmware.Root, cfg.Firmware.MaxSizeMB),
+		PortalStore: portalStore,
+		StartedAt:   time.Now(),
 	}, nil
 }

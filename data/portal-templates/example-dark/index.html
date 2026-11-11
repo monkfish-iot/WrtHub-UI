@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>访客网络认证</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <main class="portal">
+    <div class="card">
+      <p class="brand" id="pBrand">Guest WiFi</p>
+      <h1 id="pTopic">访客网络认证</h1>
+      <p class="sub" id="pSub">接入本网络需完成认证，认证成功后 24 小时内免重复登录</p>
+      <form method="post" action="#">
+        <input type="text" name="username" placeholder="姓名 / 手机号" autocomplete="username" required>
+        <button type="submit" id="pBtn">一键认证上网</button>
+      </form>
+      <div class="divider"><span>或</span></div>
+      <a class="ghost" href="#">使用短信验证码登录</a>
+      <p class="foot" id="pFoot">示例模板 · 仅作演示用途</p>
+    </div>
+  </main>
+  <script>
+  // WrtHub 可视化编辑配置约定：URL query 存在时优先（编辑中实时预览），
+  // 否则读服务端注入的 window.PORTAL_CONFIG（已保存配置）。
+  (function () {
+    var cfg = window.PORTAL_CONFIG || {};
+    var q = new URLSearchParams(location.search);
+    q.forEach(function (v, k) { if (k !== 't') cfg[k] = v; });
+    function text(id, v) { if (v) { var el = document.getElementById(id); if (el) el.textContent = v; } }
+    if (cfg.page_title) document.title = cfg.page_title;
+    text('pBrand', cfg.brand);
+    text('pTopic', cfg.topic);
+    text('pSub', cfg.subtitle);
+    text('pBtn', cfg.button_text);
+    text('pFoot', cfg.footer);
+    if (cfg.bg_image) {
+      document.body.style.background = 'center/cover no-repeat url("' + cfg.bg_image + '")';
+    }
+    if (cfg.accent_color) {
+      var btn = document.getElementById('pBtn');
+      if (btn) btn.style.background = cfg.accent_color;
+      document.querySelectorAll('.brand, .ghost').forEach(function (el) { el.style.color = cfg.accent_color; });
+    }
+  })();
+  </script>
+</body>
+</html>

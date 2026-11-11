@@ -1,0 +1,81 @@
+{{define "content"}}
+<div class="card rounded shadow-sm mb-3">
+    <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+        <span class="small fw-semibold">
+            <i class="fas fa-camera me-1"></i> 配置快照 — {{.Device.DeviceName}}（{{.Device.DeviceID}}）
+        </span>
+        <form method="post" action="/devices/{{.Device.DeviceID}}/config/snapshots/capture" class="mb-0">
+            <button type="submit" class="btn btn-primary btn-sm"
+                {{if ne .Device.Status "online"}}disabled title="设备离线"{{end}}>
+                <i class="fas fa-cloud-download-alt"></i> 从设备采集
+            </button>
+        </form>
+    </div>
+    <div class="card-body py-2 small text-muted">
+        快照为设备 UCI 配置只读采集，密钥字段已掩码；仅存档/查看/下载，不会下发到设备。
+        {{if .Policy}}保留策略：最近 {{.Policy.RetainSnapshots}} 份{{if eq .Policy.SnapshotEnabled 0}}；<span class="text-danger">已禁用采集</span>{{end}}。{{end}}
+        <a href="/devices/{{.Device.DeviceID}}/config" class="ms-2">返回设备配置</a>
+    </div>
+</div>
+
+{{if .FlashOK}}<div class="alert alert-success py-2 small">{{.FlashOK}}</div>{{end}}
+{{if .FlashErr}}<div class="alert alert-danger py-2 small">{{.FlashErr}}</div>{{end}}
+
+<div class="card rounded shadow-sm">
+    <div class="card-header bg-white py-2">
+        <span class="small fw-semibold"><i class="fas fa-list-ul me-1"></i> 快照列表（共 {{.Total}} 份）</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>采集时间</th>
+                        <th>来源</th>
+                        <th>配置包数</th>
+                        <th>大小</th>
+                        <th>SHA-256</th>
+                        <th>状态</th>
+                        <th style="width:170px;">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {{range .Snapshots}}
+                    <tr>
+                        <td>{{tFmt .CapturedAt}}</td>
+                        <td>{{$.SourceLabel .Source}}</td>
+                        <td>{{.PackageCount}}</td>
+                        <td>{{.Size}} B</td>
+                        <td><code title="{{.SHA256}}">{{trunc .SHA256 12}}</code></td>
+                        <td><span class="badge bg-secondary">{{.Status}}</span></td>
+                        <td class="text-nowrap">
+                            <a href="/devices/{{$.Device.DeviceID}}/config/snapshots/{{.SnapshotID}}" class="btn btn-outline-primary btn-sm py-0 px-1" title="详情"><i class="fas fa-eye"></i></a>
+                            <a href="/devices/{{$.Device.DeviceID}}/config/snapshots/{{.SnapshotID}}/download" class="btn btn-outline-success btn-sm py-0 px-1" title="下载"><i class="fas fa-download"></i></a>
+                            <form method="post" action="/devices/{{$.Device.DeviceID}}/config/snapshots/{{.SnapshotID}}/delete" class="d-inline"
+                                onsubmit="return confirm('确认删除该快照？此操作不可恢复。');">
+                                <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-1" title="删除"><i class="fas fa-trash"></i></button>
+                            </form>
+                        </td>
+                    </tr>
+                {{else}}
+                    <tr><td colspan="7" class="text-center text-muted py-3">暂无快照，点击右上角「从设备采集」创建第一份</td></tr>
+                {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="card-footer bg-white py-2 d-flex justify-content-between align-items-center">
+        <span class="small text-muted">第 {{.Page}} / {{.TotalPages}} 页，每页 {{.PageSize}} 条</span>
+        <nav>
+            <ul class="pagination pagination-sm mb-0">
+            {{range .Pages}}
+                {{if .Disabled}}<li class="page-item disabled"><span class="page-link">{{.Label}}</span></li>
+                {{else if .Active}}<li class="page-item active"><span class="page-link">{{.Label}}</span></li>
+                {{else}}<li class="page-item"><a class="page-link" href="{{.URL}}">{{.Label}}</a></li>
+                {{end}}
+            {{end}}
+            </ul>
+        </nav>
+    </div>
+</div>
+{{end}}

@@ -19,6 +19,14 @@ var defaultPermissions = []Permission{
 	{Code: "role:read", Name: "查看角色", Module: "role", Action: "read"},
 	{Code: "role:write", Name: "管理角色", Module: "role", Action: "write"},
 	{Code: "audit:read", Name: "查看审计", Module: "audit", Action: "read"},
+	{Code: "portal:read", Name: "查看 PORTAL", Module: "portal", Action: "read"},
+	{Code: "portal:write", Name: "管理 PORTAL", Module: "portal", Action: "write"},
+	{Code: "setting:read", Name: "查看系统设置", Module: "setting", Action: "read"},
+	{Code: "setting:write", Name: "修改系统设置", Module: "setting", Action: "write"},
+	{Code: "cert:read", Name: "查看证书", Module: "cert", Action: "read"},
+	{Code: "cert:write", Name: "管理证书", Module: "cert", Action: "write"},
+	{Code: "firmware:read", Name: "查看固件库", Module: "firmware", Action: "read"},
+	{Code: "firmware:write", Name: "管理固件库", Module: "firmware", Action: "write"},
 }
 
 // SeedRBAC 幂等地初始化默认权限集，并将全部权限赋予 admin 角色。

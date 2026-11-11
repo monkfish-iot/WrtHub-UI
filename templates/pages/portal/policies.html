@@ -1,0 +1,264 @@
+{{define "content"}}
+{{if .FlashOK}}<div class="alert alert-success alert-dismissible fade show py-2 small">{{.FlashOK}}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{{end}}
+{{if .FlashErr}}<div class="alert alert-danger alert-dismissible fade show py-2 small">{{.FlashErr}}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{{end}}
+
+<div class="toolbar-compact rounded-top border">
+    <form method="get" action="/portal/policies" class="d-flex flex-wrap align-items-center gap-2">
+        <label class="form-label mb-0 small text-nowrap" for="pKw">关键词</label>
+        <input id="pKw" type="text" class="form-control form-control-sm" name="keyword" value="{{.Keyword}}" placeholder="策略名称 / 描述" style="width:240px;">
+        <label class="form-label mb-0 small text-nowrap" for="pSt">状态</label>
+        <select id="pSt" class="form-select form-select-sm" name="status" style="width:110px;">
+            <option value="">全部</option>
+            <option value="enabled" {{if eq .Status `enabled`}}selected{{end}}>启用</option>
+            <option value="disabled" {{if eq .Status `disabled`}}selected{{end}}>停用</option>
+        </select>
+        <button class="btn btn-primary btn-sm"><i class="fas fa-search"></i> 查询</button>
+    </form>
+</div>
+
+<div class="card rounded-0 rounded-bottom shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center bg-white py-2">
+        <span class="small fw-semibold"><i class="fas fa-shield-halved me-1"></i> 认证策略 (共 {{.Total}} 条)</span>
+        <button type="button" class="btn btn-primary btn-sm" onclick="openPolicyEdit(null)">
+            <i class="fas fa-plus me-1"></i> 新建策略
+        </button>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>策略名称</th>
+                        <th>认证模板</th>
+                        <th>匹配条件</th>
+                        <th>优先级</th>
+                        <th>状态</th>
+                        <th style="width:140px;">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {{range .Policies}}
+                    <tr data-id="{{.ID}}" data-name="{{.Name}}" data-description="{{.Description}}"
+                        data-template-id="{{.TemplateID}}"
+                        data-match-ssid="{{dstr .MatchSSID}}" data-match-ac-ip="{{dstr .MatchACIP}}"
+                        data-match-ac-name="{{dstr .MatchACName}}" data-match-apid="{{dstr .MatchAPID}}"
+                        data-match-ip-prefix="{{dstr .MatchIPPrefix}}"
+                        data-time-start="{{dstr .TimeStart}}" data-time-end="{{dstr .TimeEnd}}"
+                        data-weekdays="{{dstr .Weekdays}}" data-priority="{{.Priority}}"
+                        data-is-default="{{if .IsDefault}}1{{end}}" data-status="{{.Status}}">
+                        <td class="fw-semibold">{{.Name}}{{if .IsDefault}} <span class="badge bg-success">默认</span>{{end}}</td>
+                        <td>{{index $.TplNames .TemplateID}}</td>
+                        <td>
+                            {{if or .MatchSSID .MatchACIP .MatchACName .MatchAPID .MatchIPPrefix (dstr .TimeStart) (dstr .Weekdays)}}
+                                {{if .MatchSSID}}<span class="badge bg-light text-dark border">SSID={{dstr .MatchSSID}}</span>{{end}}
+                                {{if .MatchACIP}}<span class="badge bg-light text-dark border">ACIP={{dstr .MatchACIP}}</span>{{end}}
+                                {{if .MatchACName}}<span class="badge bg-light text-dark border">AC名={{dstr .MatchACName}}</span>{{end}}
+                                {{if .MatchAPID}}<span class="badge bg-light text-dark border">APID={{dstr .MatchAPID}}</span>{{end}}
+                                {{if .MatchIPPrefix}}<span class="badge bg-light text-dark border">IP={{dstr .MatchIPPrefix}}*</span>{{end}}
+                                {{if and (dstr .TimeStart) (dstr .TimeEnd)}}<span class="badge bg-light text-dark border">{{dstr .TimeStart}}-{{dstr .TimeEnd}}</span>{{end}}
+                                {{if dstr .Weekdays}}<span class="badge bg-light text-dark border">{{wkLabel (dstr .Weekdays)}}</span>{{end}}
+                            {{else}}
+                                <span class="text-muted small">不限</span>
+                            {{end}}
+                        </td>
+                        <td>{{.Priority}}</td>
+                        <td><span class="badge bg-{{statusBadge .Status}}">{{if eq .Status "enabled"}}启用{{else}}停用{{end}}</span></td>
+                        <td class="text-nowrap">
+                            <button type="button" class="btn btn-outline-primary btn-sm py-0 px-1" title="编辑" onclick="openPolicyEdit(this.closest('tr'))"><i class="fas fa-pen"></i></button>
+                            <form method="post" action="/portal/policies/{{.ID}}/toggle" class="d-inline">
+                                <button type="submit" class="btn btn-outline-{{if eq .Status "enabled"}}warning{{else}}success{{end}} btn-sm py-0 px-1"
+                                        title="{{if eq .Status "enabled"}}停用{{else}}启用{{end}}">
+                                    <i class="fas fa-{{if eq .Status "enabled"}}pause{{else}}play{{end}}"></i>
+                                </button>
+                            </form>
+                            <form method="post" action="/portal/policies/{{.ID}}/delete" class="d-inline"
+                                  onsubmit="return confirm('确认删除该策略？')">
+                                <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-1" title="删除"><i class="fas fa-trash"></i></button>
+                            </form>
+                        </td>
+                    </tr>
+                {{else}}
+                    <tr><td colspan="6" class="text-center text-muted py-3">暂无策略，点击右上角"新建策略"开始</td></tr>
+                {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="card-footer bg-white py-2 d-flex justify-content-between align-items-center">
+        <span class="small text-muted">第 {{.Page}} / {{.TotalPages}} 页，每页 {{.PageSize}} 条（按优先级升序）</span>
+        <nav>
+            <ul class="pagination pagination-sm mb-0">
+            {{range .Pages}}
+                {{if .Disabled}}<li class="page-item disabled"><span class="page-link">{{.Label}}</span></li>
+                {{else if .Active}}<li class="page-item active"><span class="page-link">{{.Label}}</span></li>
+                {{else}}<li class="page-item"><a class="page-link" href="{{.URL}}">{{.Label}}</a></li>
+                {{end}}
+            {{end}}
+            </ul>
+        </nav>
+    </div>
+</div>
+
+<!-- 新建/编辑策略 -->
+<div class="modal fade" id="policyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="post" action="/portal/policies" id="policyForm">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="fas fa-shield-halved me-1"></i> <span id="pm_title">新建策略</span></h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="id" id="pm_id" value="">
+                    <div class="row g-2">
+                        <div class="col-12">
+                            <div class="row align-items-center">
+                                <label class="col-sm-3 col-form-label col-form-label-sm fw-semibold">策略名称 <span class="text-danger">*</span></label>
+                                <div class="col-sm-9">
+                                    <input type="text" class="form-control form-control-sm" name="name" id="pm_name" maxlength="64" required>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <div class="row align-items-center">
+                                <label class="col-sm-3 col-form-label col-form-label-sm fw-semibold">认证模板 <span class="text-danger">*</span></label>
+                                <div class="col-sm-9">
+                                    <select class="form-select form-select-sm" name="template_id" id="pm_template_id" required>
+                                        <option value="">选择模板</option>
+                                        {{range .Templates}}
+                                        <option value="{{.ID}}">{{.Name}}{{if eq .Status "disabled"}}（已停用）{{end}}</option>
+                                        {{end}}
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <div class="row align-items-start">
+                                <label class="col-sm-3 col-form-label col-form-label-sm text-muted pt-1">描述</label>
+                                <div class="col-sm-9">
+                                    <textarea class="form-control form-control-sm" name="description" id="pm_description" rows="2"></textarea>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12 border rounded p-2 bg-light">
+                            <div class="small fw-semibold text-muted mb-2">匹配条件（留空表示不限制；多条条件同时满足才命中）</div>
+                            <div class="row g-2">
+                                <div class="col-md-4 col-6">
+                                    <div class="row align-items-center">
+                                        <label class="col-4 col-form-label col-form-label-sm text-muted">SSID</label>
+                                        <div class="col-8"><input type="text" class="form-control form-control-sm" name="match_ssid" id="pm_match_ssid" placeholder="如 office-wifi"></div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 col-6">
+                                    <div class="row align-items-center">
+                                        <label class="col-4 col-form-label col-form-label-sm text-muted">AC IP</label>
+                                        <div class="col-8"><input type="text" class="form-control form-control-sm" name="match_ac_ip" id="pm_match_ac_ip" placeholder="如 10.0.2.251"></div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 col-6">
+                                    <div class="row align-items-center">
+                                        <label class="col-4 col-form-label col-form-label-sm text-muted">AC 名称</label>
+                                        <div class="col-8"><input type="text" class="form-control form-control-sm" name="match_ac_name" id="pm_match_ac_name"></div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 col-6">
+                                    <div class="row align-items-center">
+                                        <label class="col-4 col-form-label col-form-label-sm text-muted">APID</label>
+                                        <div class="col-8"><input type="text" class="form-control form-control-sm" name="match_apid" id="pm_match_apid"></div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 col-6">
+                                    <div class="row align-items-center">
+                                        <label class="col-4 col-form-label col-form-label-sm text-muted">终端 IP 前缀</label>
+                                        <div class="col-8"><input type="text" class="form-control form-control-sm" name="match_ip_prefix" id="pm_match_ip_prefix" placeholder="如 192.168.1."></div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 col-6">
+                                    <div class="row align-items-center">
+                                        <label class="col-4 col-form-label col-form-label-sm text-muted">生效时段</label>
+                                        <div class="col-8 d-flex gap-1">
+                                            <input type="time" class="form-control form-control-sm" name="time_start" id="pm_time_start" step="1800">
+                                            <input type="time" class="form-control form-control-sm" name="time_end" id="pm_time_end" step="1800">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-12">
+                                    <div class="row align-items-center">
+                                        <label class="col-md-2 col-4 col-form-label col-form-label-sm text-muted">生效日</label>
+                                        <div class="col-md-10 col-8">
+                                            <div class="d-flex gap-2 flex-wrap small" id="pm_weekdays_box">
+                                                {{range .WeekdayLabels}}
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" name="weekdays" value="{{.Val}}" id="pm_wd_{{.Val}}">
+                                                    <label class="form-check-label" for="pm_wd_{{.Val}}">{{.Label}}</label>
+                                                </div>
+                                                {{end}}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <div class="row align-items-center">
+                                <label class="col-sm-3 col-form-label col-form-label-sm text-muted">优先级</label>
+                                <div class="col-sm-9 d-flex gap-3 align-items-center flex-wrap">
+                                    <input type="number" class="form-control form-control-sm" name="priority" id="pm_priority" value="100" min="0" max="10000" style="width:100px" title="小者优先">
+                                    <div class="form-check form-switch mb-0">
+                                        <input class="form-check-input" type="checkbox" role="switch" name="is_default" value="1" id="pm_is_default">
+                                        <label class="form-check-label small" for="pm_is_default">默认策略</label>
+                                    </div>
+                                    <select class="form-select form-select-sm" name="status" id="pm_status" style="width:100px">
+                                        <option value="enabled">启用</option>
+                                        <option value="disabled">停用</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save me-1"></i> 保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+const WEEKDAYS = ['1','2','3','4','5','6','7'];
+function openPolicyEdit(tr) {
+    const f = document.getElementById('policyForm');
+    document.getElementById('pm_title').textContent = tr ? '编辑策略' : '新建策略';
+    if (tr) {
+        const d = tr.dataset;
+        f.id = '/portal/policies'; // action 不变
+        document.getElementById('pm_id').value = d.id;
+        document.getElementById('pm_name').value = d.name || '';
+        document.getElementById('pm_description').value = d.description || '';
+        document.getElementById('pm_template_id').value = d.templateId || '';
+        document.getElementById('pm_match_ssid').value = d.matchSsid || '';
+        document.getElementById('pm_match_ac_ip').value = d.matchAcIp || '';
+        document.getElementById('pm_match_ac_name').value = d.matchAcName || '';
+        document.getElementById('pm_match_apid').value = d.matchApid || '';
+        document.getElementById('pm_match_ip_prefix').value = d.matchIpPrefix || '';
+        document.getElementById('pm_time_start').value = d.timeStart || '';
+        document.getElementById('pm_time_end').value = d.timeEnd || '';
+        const wds = (d.weekdays || '').split(',').filter(Boolean);
+        document.querySelectorAll('#pm_weekdays_box input[name="weekdays"]').forEach(cb => {
+            cb.checked = wds.includes(cb.value);
+        });
+        document.getElementById('pm_priority').value = d.priority || '100';
+        document.getElementById('pm_is_default').checked = d.isDefault === '1';
+        document.getElementById('pm_status').value = d.status || 'enabled';
+    } else {
+        document.getElementById('pm_id').value = '';
+        f.reset();
+        document.getElementById('pm_priority').value = '100';
+        document.getElementById('pm_status').value = 'enabled';
+    }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('policyModal')).show();
+}
+</script>
+{{end}}

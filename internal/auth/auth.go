@@ -24,9 +24,9 @@ import (
 )
 
 const (
-	sessionName    = "wrthub"
-	ctxUserKey     = "currentUser"
-	sessionUIDKey  = "uid"
+	sessionName     = "wrthub"
+	ctxUserKey      = "currentUser"
+	sessionUIDKey   = "uid"
 	sessionUNameKey = "uname"
 )
 
@@ -75,8 +75,19 @@ func (a *LocalAuthenticator) Authenticate(ctx context.Context, username, passwor
 }
 
 // NewSessionStore 构造 cookie store（secret 来自 config.server.session_secret）。
+//
+// gorilla 默认选项为 Secure + SameSite=None，在 HTTP（非 TLS）部署下浏览器会
+// 拒绝接收这类 cookie，导致退出时写回的清空 cookie 被丢弃、会话仍然有效。
+// 这里统一覆盖为与 Login 一致的选项（非 Secure、SameSite=Lax），保证明文端口可用。
 func NewSessionStore(secret string) sessions.Store {
-	return cookie.NewStore([]byte(secret))
+	st := cookie.NewStore([]byte(secret))
+	st.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   12 * 60 * 60,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	return st
 }
 
 // SessionMiddleware 返回 gin-contrib/sessions 的 Sessions 中间件，cookie 名为 "wrthub"。
@@ -99,10 +110,18 @@ func Login(c *gin.Context, u *store.User) {
 	_ = s.Save()
 }
 
-// Logout 清空会话。
+// Logout 清空会话并让浏览器删除该 cookie。
+// 显式设置 MaxAge=-1：若沿用 store 默认（正数 MaxAge），清空后的空会话仍会以
+// 长期 cookie 写回；MaxAge=-1 才真正下发删除指令。
 func Logout(c *gin.Context) {
 	s := sessions.Default(c)
 	s.Clear()
+	s.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
 	_ = s.Save()
 }
 

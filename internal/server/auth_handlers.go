@@ -23,7 +23,9 @@ body{font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;background:#f5f6f8;m
 h1{margin:0 0 4px;font-size:20px}
 p.sub{margin:0 0 18px;color:#6c757d;font-size:13px}
 label{display:block;font-size:13px;margin:10px 0 4px}
-input{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #d0d5dd;border-radius:6px;font-size:14px}
+input{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #5e6f85;border-radius:6px;font-size:14px;background:#fcfdfe}
+input:hover{border-color:#46566b}
+input:focus{outline:none;border-color:#86b7fe;box-shadow:0 0 0 .2rem rgba(13,110,253,.25);background:#fff}
 button{width:100%;margin-top:18px;padding:9px;border:0;border-radius:6px;background:#0d6efd;color:#fff;font-size:14px;cursor:pointer}
 .err{color:#d92d20;font-size:13px;margin:10px 0}
 </style>

@@ -21,22 +21,22 @@ import (
 type CredentialProvider struct {
 	client *frpsclient.Client
 
-	mapTTL time.Duration // session_id → device_id 映射缓存 TTL
+	mapTTL  time.Duration // session_id → device_id 映射缓存 TTL
 	credTTL time.Duration // 凭证缓存 TTL（必须短）
 
-	mu       sync.Mutex
-	idMap    map[string]idEntry   // session_id → device_id
-	credMap  map[string]credEntry // device_id → 凭证
+	mu      sync.Mutex
+	idMap   map[string]idEntry   // session_id → device_id
+	credMap map[string]credEntry // device_id → 凭证
 }
 
 type idEntry struct {
 	deviceID string
-	expires time.Time
+	expires  time.Time
 }
 
 type credEntry struct {
 	username, password string
-	expires             time.Time
+	expires            time.Time
 }
 
 // NewCredentialProvider 构造凭证提供者。
@@ -103,6 +103,16 @@ func (p *CredentialProvider) deviceID(ctx context.Context, sessionID string) (st
 	p.idMap[sessionID] = idEntry{deviceID: dev.DeviceID, expires: time.Now().Add(p.mapTTL)}
 	p.mu.Unlock()
 	return dev.DeviceID, nil
+}
+
+// SetCredTTL 热更新凭证缓存 TTL（作用于新写入的缓存条目；<=0 忽略）。
+func (p *CredentialProvider) SetCredTTL(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	p.mu.Lock()
+	p.credTTL = d
+	p.mu.Unlock()
 }
 
 // Invalidate 清除指定 session_id 的映射与凭证缓存（设备下线或鉴权持续失败时调用）。

@@ -1,12 +1,229 @@
 {{define "content"}}
-<div class="card shadow-sm">
-    <div class="card-header bg-white py-2">
-        <span class="small fw-semibold"><i class="fas fa-users me-1"></i> 用户管理</span>
+{{if .FlashOK}}<div class="alert alert-success alert-dismissible fade show py-2 small">{{.FlashOK}}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{{end}}
+{{if .FlashErr}}<div class="alert alert-danger alert-dismissible fade show py-2 small">{{.FlashErr}}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{{end}}
+
+<div class="card shadow-sm mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center bg-white py-2">
+        <span class="small fw-semibold"><i class="fas fa-users me-1"></i> 本地账号 (共 {{len .Users}} 个)</span>
+        <div class="d-flex gap-2">
+            <form method="get" action="/users" class="d-flex align-items-center gap-2">
+                <label class="form-label mb-0 small text-muted text-nowrap" for="uKw">关键词</label>
+                <input id="uKw" type="text" class="form-control form-control-sm" name="keyword" value="{{.Keyword}}" placeholder="用户名 / 邮箱" style="width:200px;">
+                <button class="btn btn-outline-secondary btn-sm"><i class="fas fa-search"></i></button>
+            </form>
+            <button type="button" class="btn btn-primary btn-sm" onclick="openUserModal(null)">
+                <i class="fas fa-plus me-1"></i> 新建账号
+            </button>
+        </div>
     </div>
-    <div class="card-body text-center text-muted py-5">
-        <i class="fas fa-tools fa-2x mb-3"></i>
-        <p class="mb-1">用户管理功能开发中</p>
-        <p class="small mb-0">现阶段密码重置见《部署手册.md》§8（命令行 hashpw 工具 + sqlite3）。</p>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width:60px;">ID</th>
+                        <th>用户名</th>
+                        <th>密码</th>
+                        <th>邮箱</th>
+                        <th>角色</th>
+                        <th>状态</th>
+                        <th>创建时间</th>
+                        <th>最近登录</th>
+                        <th style="width:210px;">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {{range .Users}}
+                    <tr data-id="{{.ID}}" data-username="{{.Username}}" data-email="{{.Email}}"
+                        data-status="{{.Status}}" data-roles="{{range .RoleIDs}}{{.}},{{end}}">
+                        <td>{{.ID}}</td>
+                        <td><i class="fas fa-user-circle me-1 text-muted"></i>{{.Username}}</td>
+                        <td><span class="badge bg-secondary" title="bcrypt 哈希存储，不可逆">已哈希</span></td>
+                        <td>{{if .Email}}{{.Email}}{{else}}<span class="text-muted">-</span>{{end}}</td>
+                        <td>{{if .RoleNames}}{{.RoleNames}}{{else}}<span class="text-muted">未分配</span>{{end}}</td>
+                        <td>
+                            {{if eq .Status 1}}<span class="badge bg-success">启用</span>{{else}}<span class="badge bg-secondary">禁用</span>{{end}}
+                        </td>
+                        <td class="small text-muted">{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
+                        <td class="small">
+                            {{if eq .LastLogin "-"}}<span class="text-muted">从未登录</span>
+                            {{else}}{{.LastLogin}} <span class="text-muted">（{{.LoginCount}} 次）</span>{{end}}
+                        </td>
+                        <td class="text-nowrap">
+                            <button type="button" class="btn btn-outline-primary btn-sm py-0 px-1" title="编辑" onclick="openUserModal(this.closest('tr'))">
+                                <i class="fas fa-pen"></i>
+                            </button>
+                            <form method="post" action="/users/{{.ID}}/toggle" class="d-inline">
+                                <button type="submit" class="btn btn-outline-warning btn-sm py-0 px-1" title="{{if eq .Status 1}}禁用{{else}}启用{{end}}">
+                                    <i class="fas {{if eq .Status 1}}fa-ban{{else}}fa-circle-check{{end}}"></i>
+                                </button>
+                            </form>
+                            <a href="/users?logs={{.ID}}" class="btn btn-outline-secondary btn-sm py-0 px-1" title="登录日志">
+                                <i class="fas fa-clock-rotate-left"></i>
+                            </a>
+                            <form method="post" action="/users/{{.ID}}/delete" class="d-inline" onsubmit="return confirm('确认删除账号 {{.Username}}？此操作不可恢复。')">
+                                <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-1" title="删除">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                {{else}}
+                    <tr><td colspan="9" class="text-center text-muted py-3">暂无账号</td></tr>
+                {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="card-footer bg-white py-2 small text-muted">
+        密码以 bcrypt 哈希存储，列表中不回显明文；登录日志取自操作日志（module=auth）。
     </div>
 </div>
+
+{{if .LogsUser}}
+<div class="card shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center bg-white py-2">
+        <span class="small fw-semibold">
+            <i class="fas fa-clock-rotate-left me-1"></i> 登录日志：{{.LogsUser.Username}}
+            <span class="text-muted">（共 {{.LogsTotal}} 条，最多展示 200 条）</span>
+        </span>
+        <a href="/users" class="btn btn-outline-secondary btn-sm py-0 px-2"><i class="fas fa-arrow-left me-1"></i>返回</a>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width:180px;">登录时间</th>
+                        <th style="width:160px;">登录 IP</th>
+                        <th style="width:100px;">动作</th>
+                        <th style="width:90px;">结果</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {{range .Logs}}
+                    <tr>
+                        <td>{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
+                        <td><code>{{.ClientIP}}</code></td>
+                        <td>{{if eq .Action "login"}}登录{{else}}登出{{end}}</td>
+                        <td>{{if eq .Result "success"}}<span class="badge bg-success">成功</span>{{else}}<span class="badge bg-danger">失败</span>{{end}}</td>
+                        <td class="small text-muted">{{if .ErrorMsg}}{{.ErrorMsg}}{{else}}-{{end}}</td>
+                    </tr>
+                {{else}}
+                    <tr><td colspan="5" class="text-center text-muted py-3">暂无登录日志</td></tr>
+                {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{{end}}
+
+<div class="modal fade" id="userModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="userForm" method="post" action="/users">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="fas fa-user-pen me-1"></i> <span id="um_title">新建账号</span></h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-2">
+                        <div class="col-12">
+                            <div class="row align-items-center">
+                                <label class="col-sm-3 col-form-label col-form-label-sm text-muted">用户名</label>
+                                <div class="col-sm-9">
+                                    <input type="text" class="form-control form-control-sm" name="username" id="um_username" maxlength="64" required>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <div class="row align-items-center">
+                                <label class="col-sm-3 col-form-label col-form-label-sm text-muted">密码</label>
+                                <div class="col-sm-9">
+                                    <input type="password" class="form-control form-control-sm" name="password" id="um_password" minlength="6" autocomplete="new-password">
+                                    <span id="um_pwd_hint" class="form-text"></span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <div class="row align-items-center">
+                                <label class="col-sm-3 col-form-label col-form-label-sm text-muted">邮箱</label>
+                                <div class="col-sm-9">
+                                    <input type="email" class="form-control form-control-sm" name="email" id="um_email" maxlength="128" placeholder="可选">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <div class="row align-items-start">
+                                <label class="col-sm-3 col-form-label col-form-label-sm text-muted pt-1">角色</label>
+                                <div class="col-sm-9">
+                                    <div class="border rounded p-2">
+                                        {{range .Roles}}
+                                        <div class="form-check form-check-inline">
+                                            <input class="form-check-input" type="checkbox" name="roles" value="{{.ID}}" id="um_role_{{.ID}}" data-role="{{.ID}}">
+                                            <label class="form-check-label small" for="um_role_{{.ID}}">{{.Name}} <code>{{.Code}}</code></label>
+                                        </div>
+                                        {{else}}
+                                        <span class="small text-muted">系统暂无角色（admin 角色应已存在，请检查初始化）</span>
+                                        {{end}}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <div class="row align-items-center">
+                                <label class="col-sm-3 col-form-label col-form-label-sm text-muted">状态</label>
+                                <div class="col-sm-9">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" role="switch" id="um_status" name="status" value="1" checked>
+                                        <label class="form-check-label small" for="um_status">启用</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save me-1"></i>保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function openUserModal(tr) {
+    const f = document.getElementById('userForm');
+    const roles = document.querySelectorAll('#userModal [data-role]');
+    if (!tr) {
+        document.getElementById('um_title').textContent = '新建账号';
+        document.getElementById('um_pwd_hint').textContent = '（至少 6 位）';
+        f.action = '/users';
+        f.username.value = '';
+        f.username.readOnly = false;
+        f.password.value = '';
+        f.password.required = true;
+        f.email.value = '';
+        f.status.checked = true;
+        roles.forEach(cb => cb.checked = false);
+    } else {
+        const d = tr.dataset;
+        document.getElementById('um_title').textContent = '编辑账号：' + d.username;
+        document.getElementById('um_pwd_hint').textContent = '（留空则保留原密码）';
+        f.action = '/users/' + encodeURIComponent(d.id);
+        f.username.value = d.username;
+        f.username.readOnly = true;
+        f.password.value = '';
+        f.password.required = false;
+        f.email.value = d.email || '';
+        f.status.checked = d.status === '1';
+        const ids = (d.roles || '').split(',').filter(Boolean);
+        roles.forEach(cb => cb.checked = ids.indexOf(cb.dataset.role) >= 0);
+    }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('userModal')).show();
+}
+</script>
 {{end}}

@@ -4,17 +4,15 @@
     <a href="/devices/{{.DeviceID}}" class="btn btn-outline-secondary btn-sm"><i class="fas fa-arrow-left"></i> 返回详情</a>
 </div>
 
-<form method="get" action="/devices/{{.DeviceID}}/wireless" class="row g-2 align-items-end mb-2" onchange="this.submit()">
-    <div class="col-auto">
-        <label class="form-label mb-0 small">无线接口</label>
-        <select class="form-select form-select-sm" name="ifname">
-            {{range .Interfaces}}
-            <option value="{{.}}" {{if eq . $.CurIfname}}selected{{end}}>{{.}}</option>
-            {{end}}
-        </select>
-    </div>
+<form method="get" action="/devices/{{.DeviceID}}/wireless" class="d-flex flex-wrap align-items-center gap-2 mb-2" onchange="this.submit()">
+    <label class="form-label mb-0 small text-nowrap" for="wIf">无线接口</label>
+    <select id="wIf" class="form-select form-select-sm" name="ifname" style="width:auto;">
+        {{range .Interfaces}}
+        <option value="{{.}}" {{if eq . $.CurIfname}}selected{{end}}>{{.}}</option>
+        {{end}}
+    </select>
     <input type="hidden" name="tab" value="{{.Tab}}">
-    <noscript><div class="col-auto"><button class="btn btn-primary btn-sm">切换</button></div></noscript>
+    <noscript><button class="btn btn-primary btn-sm">切换</button></noscript>
 </form>
 
 <ul class="nav nav-pills mb-2">

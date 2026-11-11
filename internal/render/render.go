@@ -14,6 +14,7 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,6 +38,12 @@ func NewRenderer(dir string) (*Renderer, error) {
 		"tFmt":        tFmt,
 		"statusBadge": statusBadge,
 		"bsstr":       bsstr,
+		"trunc":       trunc,
+		"durSince":    durSince,
+		"dstr":        dstr,
+		"fsize":       fsize,
+		"wkLabel":     wkLabel,
+		"urlq":        url.QueryEscape,
 	}
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -101,6 +108,79 @@ func tFmt(t any) string {
 	}
 }
 
+// durSince 以人类可读格式输出自 t 起的时长（1天3小时 / 2小时5分 / 45秒）；t 为空返回 "-"。
+func durSince(t any) string {
+	var start time.Time
+	switch v := t.(type) {
+	case *time.Time:
+		if v == nil {
+			return "-"
+		}
+		start = *v
+	case time.Time:
+		start = v
+	default:
+		return "-"
+	}
+	if start.IsZero() {
+		return "-"
+	}
+	d := time.Since(start)
+	if d < 0 {
+		return "-"
+	}
+	switch {
+	case d >= 24*time.Hour:
+		return fmt.Sprintf("%d天%d小时", int(d.Hours())/24, int(d.Hours())%24)
+	case d >= time.Hour:
+		return fmt.Sprintf("%d小时%d分", int(d.Hours()), int(d.Minutes())%60)
+	case d >= time.Minute:
+		return fmt.Sprintf("%d分%d秒", int(d.Minutes()), int(d.Seconds())%60)
+	default:
+		return fmt.Sprintf("%d秒", int(d.Seconds()))
+	}
+}
+
+// dstr 解引用字符串指针（nil → ""），便于模板渲染可选匹配条件。
+func dstr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+// fsize 人类可读文件大小。
+func fsize(n int64) string {
+	switch {
+	case n <= 0:
+		return "-"
+	case n < 1024:
+		return fmt.Sprintf("%d B", n)
+	case n < 1024*1024:
+		return fmt.Sprintf("%.1f KB", float64(n)/1024)
+	default:
+		return fmt.Sprintf("%.2f MB", float64(n)/(1024*1024))
+	}
+}
+
+// wkLabel 将 weekdays "1,3" 转为 "周一三" 样式缩写（1=周一 … 7=周日）。
+func wkLabel(w string) string {
+	if w == "" {
+		return ""
+	}
+	names := []string{"一", "二", "三", "四", "五", "六", "日"}
+	var b strings.Builder
+	b.WriteString("周")
+	for _, part := range strings.Split(w, ",") {
+		part = strings.TrimSpace(part)
+		if len(part) != 1 || part[0] < '1' || part[0] > '7' {
+			continue
+		}
+		b.WriteString(names[part[0]-'1'])
+	}
+	return b.String()
+}
+
 // statusBadge 将设备状态映射为 Bootstrap badge 颜色类后缀（success/secondary/warning）。
 func statusBadge(s string) string {
 	switch strings.ToLower(s) {
@@ -118,4 +198,12 @@ func statusBadge(s string) string {
 // bsstr 将 []byte 转 string（用于审计日志 Detail 字段渲染）。
 func bsstr(b []byte) string {
 	return string(b)
+}
+
+// trunc 截断字符串到前 n 个字符（超长时追加省略号），用于 SHA-256 等长指纹的缩略显示。
+func trunc(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
