@@ -40,9 +40,6 @@ type radiusPage struct {
 	CfgErr   string // 全局配置拉取失败提示（frps_helper 不可达等）
 	FlashOK  string
 	FlashErr string
-	// LocalUsers 本地 RADIUS 用户列表（auth_source=local 时使用）
-	LocalUsers []frpsclient.LocalUserItem
-	LocalTotal int
 }
 
 // handleRadiusPage 渲染认证源管理页（/auth-source）。
@@ -71,11 +68,7 @@ func (a *App) handleRadiusPage(c *gin.Context) {
 		}
 	}
 
-	// 本地 RADIUS 用户列表（用于认证源管理 TAB；拉取失败仅影响展示）
-	if lu, err := a.Frps.ListLocalUsers(c.Request.Context(), 1, 200, "", ""); err == nil && lu != nil {
-		pg.LocalUsers = lu.List
-		pg.LocalTotal = lu.Total
-	}
+	// 本地用户列表由前端分页接口 /auth-source/api/local-users 按需拉取，页面渲染不再预查询
 
 	if rerr := a.Render.Render(c.Writer, "pages/radius/index", pg); rerr != nil {
 		a.Log.Error("render radius page failed", "err", rerr)

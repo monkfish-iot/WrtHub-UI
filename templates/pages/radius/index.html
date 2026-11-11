@@ -38,9 +38,26 @@
                             <div class="tab-pane fade {{if eq .Cfg.AuthSource "local"}}show active{{end}}" id="tab-local">
                                 <div class="small text-muted mb-2">
                                     独立于设备凭证的本地 RADIUS 用户（<code>local_users</code> 表）。
-                                    密码由服务端 CA 公钥加密存储，不回显明文。共 {{.LocalTotal}} 条。
+                                    密码由服务端 CA 公钥加密存储，不回显明文。共 <span id="lu-total-text">0</span> 条。
                                 </div>
-                                <div class="d-flex justify-content-end mb-2">
+                                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                                    <div class="d-flex flex-wrap align-items-center gap-2">
+                                        <div class="input-group input-group-sm" style="width:260px;">
+                                            <input type="text" class="form-control" id="lu-search" placeholder="搜索用户名 / 显示名 / 备注"
+                                                   onkeydown="if (event.key === 'Enter') { event.preventDefault(); loadLocalUsers(1); }">
+                                            <button class="btn btn-outline-secondary" type="button" title="查询" onclick="loadLocalUsers(1)"><i class="fas fa-search"></i></button>
+                                        </div>
+                                        <select class="form-select form-select-sm" id="lu-status-filter" style="width:130px;" onchange="loadLocalUsers(1)">
+                                            <option value="">全部状态</option>
+                                            <option value="active">active</option>
+                                            <option value="disabled">disabled</option>
+                                        </select>
+                                        <select class="form-select form-select-sm" id="lu-page-size" style="width:120px;" onchange="loadLocalUsers(1)">
+                                            <option value="20">20 条/页</option>
+                                            <option value="50" selected>50 条/页</option>
+                                            <option value="100">100 条/页</option>
+                                        </select>
+                                    </div>
                                     <button type="button" class="btn btn-primary btn-sm" onclick="openLocalUserModal()"><i class="fas fa-plus me-1"></i> 新建本地用户</button>
                                 </div>
                                 <div class="border rounded">
@@ -53,45 +70,14 @@
                                                 </tr>
                                             </thead>
                                             <tbody id="local-user-tbody">
-                                            {{range .LocalUsers}}
-                                                <tr data-user-id="{{.ID}}">
-                                                    <td>{{.ID}}</td>
-                                                    <td><code>{{.Username}}</code></td>
-                                                    <td>{{if .DisplayName}}{{.DisplayName}}{{else}}<span class="text-muted">-</span>{{end}}</td>
-                                                    <td>
-                                                        {{if eq .Status "active"}}<span class="badge bg-success">active</span>
-                                                        {{else}}<span class="badge bg-secondary">disabled</span>{{end}}
-                                                    </td>
-                                                    <td>{{if .Remark}}{{.Remark}}{{else}}<span class="text-muted">-</span>{{end}}</td>
-                                                    <td class="small text-nowrap">
-                                                        下行 {{if .DownRateMbps}}{{.DownRateMbps}}{{else}}不限{{end}} /
-                                                        上行 {{if .UpRateMbps}}{{.UpRateMbps}}{{else}}不限{{end}} Mbps
-                                                        <div class="text-muted">
-                                                            配额 {{if .DataQuotaMB}}{{.DataQuotaMB}} MB{{else}}不限{{end}} ·
-                                                            时长 {{if .SessionTimeoutSec}}{{.SessionTimeoutSec}} 秒{{else}}不限{{end}}
-                                                            {{if .IdleTimeoutSec}}· 空闲 {{.IdleTimeoutSec}} 秒{{end}}
-                                                        </div>
-                                                    </td>
-                                                    <td>
-                                                        {{if .LastLoginAt}}{{tFmt .LastLoginAt}}
-                                                            <div class="small text-muted">{{.LastLoginIP}}</div>
-                                                        {{else}}<span class="text-muted">从未</span>{{end}}
-                                                    </td>
-                                                    <td>
-                                                        {{tFmt .CreatedAt}} →<br>{{tFmt .UpdatedAt}}
-                                                    </td>
-                                                    <td class="text-nowrap">
-                                                        <button type="button" class="btn btn-outline-primary btn-sm py-0 px-1" title="编辑" onclick="openLocalUserModal({{.ID}})"><i class="fas fa-pen"></i></button>
-                                                        <button type="button" class="btn btn-outline-info btn-sm py-0 px-1 ms-1" title="登录日志" onclick="showLocalUserLogs({{.ID}}, '{{.Username}}')"><i class="fas fa-clock"></i></button>
-                                                        <button type="button" class="btn btn-outline-danger btn-sm py-0 px-1 ms-1" title="删除" onclick="deleteLocalUser({{.ID}}, '{{.Username}}')"><i class="fas fa-trash"></i></button>
-                                                    </td>
-                                                </tr>
-                                            {{else}}
-                                                <tr><td colspan="9" class="text-center text-muted py-3">暂无本地用户；点上方按钮新建</td></tr>
-                                            {{end}}
+                                                <tr><td colspan="9" class="text-center text-muted py-3">加载中…</td></tr>
                                             </tbody>
                                         </table>
                                     </div>
+                                </div>
+                                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2">
+                                    <div class="small text-muted" id="lu-page-info">-</div>
+                                    <ul class="pagination pagination-sm mb-0" id="lu-pagination"></ul>
                                 </div>
                             </div>
 
@@ -633,7 +619,7 @@
                 return false;
             }
             bootstrap.Modal.getInstance(document.getElementById('localUserModal')).hide();
-            location.reload();
+            loadLocalUsers();
         } catch (err) {
             luShowAlert('请求失败：' + err.message);
         }
@@ -645,7 +631,7 @@
         fetch(API_BASE + '/' + id, { method: 'DELETE', headers: headers() })
             .then(r => r.json())
             .then(data => {
-                if (data.code === 0) location.reload();
+                if (data.code === 0) loadLocalUsers();
                 else alert(data.message || data.msg || '删除失败');
             })
             .catch(err => alert('请求失败：' + err.message));
@@ -676,6 +662,122 @@
             document.getElementById('localUserLogBody').innerHTML = '<tr><td colspan="6" class="text-center text-danger py-2">加载失败</td></tr>';
         }
     };
+
+    // ---- 本地用户列表：分页 + 查询 ----
+    var luState = { page: 1, size: 50, q: '', status: '', total: 0, names: {} };
+
+    function luEsc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    function luFmtTime(s) {
+        if (!s) return '';
+        var d = new Date(s);
+        if (isNaN(d.getTime())) return luEsc(s);
+        function p(n) { return n < 10 ? '0' + n : '' + n; }
+        return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
+            p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+    }
+
+    function luRowHtml(u) {
+        var policy = '下行 ' + (u.down_rate_mbps || '不限') + ' / 上行 ' + (u.up_rate_mbps || '不限') + ' Mbps' +
+            '<div class="text-muted">配额 ' + (u.data_quota_mb ? u.data_quota_mb + ' MB' : '不限') +
+            ' · 时长 ' + (u.session_timeout_sec ? u.session_timeout_sec + ' 秒' : '不限') +
+            (u.idle_timeout_sec ? ' · 空闲 ' + u.idle_timeout_sec + ' 秒' : '') + '</div>';
+        var last = u.last_login_at
+            ? luFmtTime(u.last_login_at) + '<div class="small text-muted">' + luEsc(u.last_login_ip) + '</div>'
+            : '<span class="text-muted">从未</span>';
+        return '<tr data-user-id="' + u.id + '">' +
+            '<td>' + u.id + '</td>' +
+            '<td><code>' + luEsc(u.username) + '</code></td>' +
+            '<td>' + (u.display_name ? luEsc(u.display_name) : '<span class="text-muted">-</span>') + '</td>' +
+            '<td>' + (u.status === 'disabled'
+                ? '<span class="badge bg-secondary">disabled</span>'
+                : '<span class="badge bg-success">active</span>') + '</td>' +
+            '<td>' + (u.remark ? luEsc(u.remark) : '<span class="text-muted">-</span>') + '</td>' +
+            '<td class="small text-nowrap">' + policy + '</td>' +
+            '<td>' + last + '</td>' +
+            '<td>' + luFmtTime(u.created_at) + ' →<br>' + luFmtTime(u.updated_at) + '</td>' +
+            '<td class="text-nowrap">' +
+            '<button type="button" class="btn btn-outline-primary btn-sm py-0 px-1" title="编辑" onclick="openLocalUserModal(' + u.id + ')"><i class="fas fa-pen"></i></button>' +
+            '<button type="button" class="btn btn-outline-info btn-sm py-0 px-1 ms-1" title="登录日志" onclick="luShowLogs(' + u.id + ')"><i class="fas fa-clock"></i></button>' +
+            '<button type="button" class="btn btn-outline-danger btn-sm py-0 px-1 ms-1" title="删除" onclick="luDeleteUser(' + u.id + ')"><i class="fas fa-trash"></i></button>' +
+            '</td></tr>';
+    }
+
+    function luRenderPager(total) {
+        var size = luState.size;
+        var pages = Math.max(1, Math.ceil(total / size));
+        if (luState.page > pages) { luState.page = pages; return window.loadLocalUsers(pages); }
+
+        var ul = document.getElementById('lu-pagination');
+        var info = document.getElementById('lu-page-info');
+        if (total === 0) {
+            ul.innerHTML = '';
+            info.textContent = '共 0 条';
+            return;
+        }
+        var start = (luState.page - 1) * size + 1;
+        var end = Math.min(luState.page * size, total);
+        info.textContent = '第 ' + start + '-' + end + ' 条，共 ' + total + ' 条（第 ' + luState.page + '/' + pages + ' 页）';
+
+        function btn(label, page, disabled, active) {
+            if (disabled) return '<li class="page-item disabled"><span class="page-link">' + label + '</span></li>';
+            if (active) return '<li class="page-item active"><span class="page-link">' + label + '</span></li>';
+            return '<li class="page-item"><button type="button" class="page-link" onclick="loadLocalUsers(' + page + ')">' + label + '</button></li>';
+        }
+        var html = btn('上一页', luState.page - 1, luState.page <= 1, false);
+        var from = Math.max(1, luState.page - 3);
+        var to = Math.min(pages, from + 6);
+        from = Math.max(1, to - 6);
+        if (from > 1) html += btn('1', 1, false, luState.page === 1) + '<li class="page-item disabled"><span class="page-link">…</span></li>';
+        for (var p = from; p <= to; p++) html += btn('' + p, p, false, p === luState.page);
+        if (to < pages) html += '<li class="page-item disabled"><span class="page-link">…</span></li>' + btn('' + pages, pages, false, luState.page === pages);
+        html += btn('下一页', luState.page + 1, luState.page >= pages, false);
+        ul.innerHTML = html;
+    }
+
+    window.loadLocalUsers = async function (page) {
+        if (page) luState.page = page;
+        luState.q = document.getElementById('lu-search').value.trim();
+        luState.status = document.getElementById('lu-status-filter').value;
+        luState.size = parseInt(document.getElementById('lu-page-size').value, 10) || 50;
+
+        var tbody = document.getElementById('local-user-tbody');
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-3">加载中…</td></tr>';
+        try {
+            var qs = '?page=' + luState.page + '&size=' + luState.size;
+            if (luState.q) qs += '&q=' + encodeURIComponent(luState.q);
+            if (luState.status) qs += '&status=' + encodeURIComponent(luState.status);
+            var resp = await fetch(API_BASE + qs, { headers: headers() });
+            var data = await resp.json();
+            if (!resp.ok || data.code !== 0) throw new Error(data.message || data.msg || '加载失败');
+            var res = data.data || {};
+            var list = res.list || [];
+            luState.total = res.total || 0;
+            luState.names = {};
+            list.forEach(function (u) { luState.names[u.id] = u.username; });
+            document.getElementById('lu-total-text').textContent = luState.total;
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-3">' +
+                    (luState.q || luState.status ? '没有符合条件的本地用户' : '暂无本地用户；点上方按钮新建') + '</td></tr>';
+            } else {
+                tbody.innerHTML = list.map(luRowHtml).join('');
+            }
+            luRenderPager(luState.total);
+        } catch (err) {
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-danger py-3">加载失败：' + luEsc(err.message) + '</td></tr>';
+            document.getElementById('lu-pagination').innerHTML = '';
+            document.getElementById('lu-page-info').textContent = '-';
+        }
+    };
+
+    window.luShowLogs = function (id) { window.showLocalUserLogs(id, luState.names[id] || ('#' + id)); };
+    window.luDeleteUser = function (id) { window.deleteLocalUser(id, luState.names[id] || ('#' + id)); };
+
+    window.loadLocalUsers(1);
 })();
 </script>
 {{end}}
