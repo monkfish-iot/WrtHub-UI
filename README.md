@@ -21,6 +21,16 @@
 
 WrtHub-UI 是一套面向海量 OpenWrt 设备的集中管理平台。它通过 **frps_helper** 北向接口获取设备列表与临时凭证，再经 frp 隧道（或直连设备 LAN）访问设备，以 **UBUS JSON-RPC** 完成设备信息采集、无线网络配置与监控、固件升级等操作。平台同时承担 **PORTAL 认证运营**：管理认证模板、认证策略、认证日志，维护北向认证源（本地用户 / RADIUS / HTTP / LDAP），并查看在线会话。自带用户 / 角色 / 权限（RBAC）与操作日志体系。
 
+### 特性一览
+
+- **集中纳管**：一个入口管理全部设备，经 frp 隧道或 LAN 直连，无需逐台暴露管理端口
+- **无线管理**：radio 参数调整、SSID 增删改、周边 AP 扫描、接入客户端踢下线
+- **认证源管理**：本地用户 / RADIUS / HTTP / LDAP 四选一，支持带宽与在线时长策略
+- **PORTAL 运营**：模板可视化编辑与实时预览、认证策略匹配、认证日志查询
+- **在线会话**：5 秒自动刷新，可强制下线
+- **配置与固件**：配置快照与关键项合规比对、固件库管理与一键升级
+- **安全与审计**：17 项 RBAC 权限、全局写操作审计、WAN 口永不可写
+
 ### 界面预览
 
 | 设备概览（设备信息 + 系统信息） | 无线配置（无线网卡参数 / 新增 SSID） |
@@ -292,6 +302,16 @@ sudo journalctl -u wrthub-ui -f                            # 查看日志
 WrtHub-UI is a centralized management platform for fleets of OpenWrt devices. It retrieves the device list and temporary credentials from the **frps_helper** northbound API, then reaches each device through the frp tunnel (or directly over its LAN) and uses **UBUS JSON-RPC** for device information, wireless configuration & monitoring, and firmware upgrades. It also covers **portal operations**: authentication templates, policies and auth logs, northbound auth sources (local users / RADIUS / HTTP / LDAP), and live sessions. It ships with its own user / role / permission (RBAC) and operation-log subsystem.
 
 > **Project documentation site: <http://monkfish.cn>**
+
+### Highlights
+
+- **One console for the whole fleet** — reach every device over the frp tunnel or directly via its LAN; no management port exposed per device
+- **Wireless management** — tune radio parameters, add / edit / delete SSIDs, scan nearby APs, kick associated clients
+- **Auth sources** — choose one of local users / RADIUS / HTTP / LDAP, with bandwidth and online-time policies
+- **Portal operations** — visual template editing with live preview, policy matching, auth-log search
+- **Live sessions** — auto-refresh every 5 s with forced logout
+- **Configuration & firmware** — config snapshots with key-item compliance checks, firmware library and one-click upgrade
+- **Security & audit** — 17 RBAC permissions, global write-operation audit, WAN interface never writable
 
 ### Screenshots
 
