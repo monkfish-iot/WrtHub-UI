@@ -60,7 +60,7 @@ WrtHub-UI 是一套面向海量 OpenWrt 设备的集中管理平台。它通过 
 - **无线管理**：多无线网卡（radio）识别与参数编辑（国家 / 信道 / 无线模式 / 频宽 / 发射功率 / 启停）；SSID 新增 / 编辑 / 删除 / 隐藏 / 客户端隔离；周边 AP 扫描（`iwinfo.scan`）；接入客户端（`iwinfo.assoclist`）。
 - **配置项与配置快照**：按内置关键项清单（`webauthd.*` / `network.lan.*` / `wireless.radio0.*`）读取设备 UCI 并比对基线，标记 `ok` / `drift` / `missing` / `na` / `error`；可采集配置快照、查看详情、下载备份，用于变更前后追溯。
 - **认证源管理（北向）**：一次只选一个认证数据源——本地用户（`local_users`，密码经服务端 CA 公钥加密存储）、RADIUS、HTTP、LDAP；本地用户支持增删改查、启停、带宽策略（上 / 下行速率）、在线时长配额与登录日志；可设置 `NAS-IP-Address`，保存即时生效。另在设备详情页维护每设备对接参数与南向认证源切换（写设备 UCI `webauthd`）。
-- **在线会话**：记账会话列表（5 秒自动刷新），支持强制下线（经隧道调用设备 `webauthd.session/drop_user`）。
+- **在线会话**：记账会话列表（分页 / 关键字查询，5 秒自动刷新），支持强制下线（经隧道调用设备 `webauthd.session/drop_user`）。
 - **PORTAL 认证运营**：认证模板上传（zip，白名单校验）/ 复制 / 启停 / 删除 / 在线源码编辑 / 可视化编辑（`schema.json` 声明文案、颜色、图片）/ 实时预览；认证策略按 SSID / AC / APID / IP 前缀 / 时段 / 星期匹配后选用模板；认证日志查询与详情。
 - **系统设置**：TAB 组织 PORTAL 设置、RADIUS 服务、证书管理（`ca` / `server-auth` / `https` 三槽位上传、校验、应用热生效、历史版本与回滚、备份恢复）、固件管理（按型号分目录，上传自动生成说明 JSON）。
 - **系统日志**：拉取设备日志，优先使用固件自定义的 `mk.aplogs` 对象，缺失时回退标准 `log` 对象。
@@ -76,7 +76,7 @@ WrtHub-UI 是一套面向海量 OpenWrt 设备的集中管理平台。它通过 
 | 概况 | `/overview` | 默认首页：设备统计、在线会话、本地用户、RADIUS 运行时、今日 PORTAL 认证、服务运行状态、最近操作与认证日志 |
 | 设备管理 | `/devices` | 分页 / 关键字 / 状态过滤；设备详情（北向字段 + `system.board`）；网络接口；配置项；配置快照；重启；固件升级 |
 | 认证源管理 | `/auth-source` | 北向认证源（local / radius / http / ldap）配置、本地用户 CRUD 与登录日志、每设备 RADIUS 参数 |
-| 在线会话 | `/sessions` | 记账会话列表（5 秒自动刷新）、强制下线 |
+| 在线会话 | `/sessions` | 记账会话列表（分页 / 关键字查询，5 秒自动刷新）、强制下线 |
 | 认证模板 | `/portal/templates` | 模板上传 / 复制 / 启停 / 删除、源码与可视化编辑、实时预览 |
 | 认证策略 | `/portal/policies` | 认证策略启用 / 停用 / 删除 |
 | 认证日志 | `/portal/auth-logs` | PORTAL 认证记录查询与详情 |
@@ -342,7 +342,7 @@ WrtHub-UI is a centralized management platform for fleets of OpenWrt devices. It
 - **Wireless management** — detect multiple radios and edit their parameters (country / channel / mode / bandwidth / txpower / enable); add, edit, delete, hide SSIDs and toggle client isolation; scan nearby APs (`iwinfo.scan`); list associated clients (`iwinfo.assoclist`).
 - **Config items & snapshots** — read device UCI against a built-in key-item checklist (`webauthd.*` / `network.lan.*` / `wireless.radio0.*`) and flag `ok` / `drift` / `missing` / `na` / `error`; capture config snapshots, inspect details and download them for change traceability.
 - **Auth source management (northbound)** — pick exactly one authentication data source: local users (`local_users`, passwords encrypted with the server CA public key), RADIUS, HTTP or LDAP. Local users support CRUD, enable/disable, bandwidth policy (up/down rate), online-time quota and login logs; `NAS-IP-Address` is configurable and takes effect immediately. Per-device RADIUS parameters and the southbound auth-source switch (writing device UCI `webauthd`) live on the device detail page.
-- **Live sessions** — accounting session list (auto-refresh every 5 s) with forced logout via `webauthd.session/drop_user` over the tunnel.
+- **Live sessions** — accounting session list (paging / keyword search, auto-refresh every 5 s) with forced logout via `webauthd.session/drop_user` over the tunnel.
 - **Portal operations** — template upload (zip with whitelist validation) / fork / enable / delete, online source editing, visual editing driven by `schema.json` (copy, colors, images) with live preview; policies that select a template by SSID / AC / APID / IP prefix / time window / weekday; auth-log search and detail.
 - **System settings** — tabs for Portal settings, RADIUS service, certificate management (`ca` / `server-auth` / `https` slots: upload, validate, hot apply, versions & rollback, backup restore) and firmware management (per-model directories, notes JSON generated on upload).
 - **System log** — pull device logs, preferring the firmware's custom `mk.aplogs` object and falling back to the standard `log` object.
@@ -358,7 +358,7 @@ WrtHub-UI is a centralized management platform for fleets of OpenWrt devices. It
 | Overview | `/overview` | Default home: device stats, sessions, local users, RADIUS, portal auths, service health, recent logs |
 | Devices | `/devices` | Paging / keyword / status filter; detail, interfaces, config items, snapshots, reboot, firmware upgrade |
 | Auth sources | `/auth-source` | Northbound source (local / radius / http / ldap), local users CRUD + login logs, per-device RADIUS |
-| Sessions | `/sessions` | Accounting sessions (5 s auto-refresh), forced logout |
+| Sessions | `/sessions` | Accounting sessions (paging / keyword search, 5 s auto-refresh), forced logout |
 | Portal templates | `/portal/templates` | Upload / fork / toggle / delete, source & visual editing, live preview |
 | Portal policies | `/portal/policies` | Enable / disable / delete policies |
 | Portal auth logs | `/portal/auth-logs` | Portal authentication records and details |

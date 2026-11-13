@@ -199,10 +199,15 @@ func atoiDefault(s string, def int) int {
 	return n
 }
 
-// buildPageLinks 构造分页条目：« + 首页 + 省略号 + 当前±2 + 省略号 + 末页 + »。
+// buildPageLinks 构造设备列表分页条目（保留设备过滤条件）。
 func buildPageLinks(page, total int, f deviceFilters) []pageLink {
+	return buildPager(page, total, func(n int) string { return pageURL(n, f) })
+}
+
+// buildPager 构造分页条目：« + 首页 + 省略号 + 当前±2 + 省略号 + 末页 + »。
+func buildPager(page, total int, urlOf func(int) string) []pageLink {
 	links := make([]pageLink, 0, 10)
-	links = append(links, pageLink{Label: "«", URL: pageURL(page-1, f), Disabled: page <= 1})
+	links = append(links, pageLink{Label: "«", URL: urlOf(page - 1), Disabled: page <= 1})
 
 	start := page - 2
 	if start < 1 {
@@ -213,21 +218,21 @@ func buildPageLinks(page, total int, f deviceFilters) []pageLink {
 		end = total
 	}
 	if start > 1 {
-		links = append(links, pageLink{Label: "1", URL: pageURL(1, f)})
+		links = append(links, pageLink{Label: "1", URL: urlOf(1)})
 		if start > 2 {
 			links = append(links, pageLink{Label: "…", Disabled: true})
 		}
 	}
 	for i := start; i <= end; i++ {
-		links = append(links, pageLink{Label: strconv.Itoa(i), URL: pageURL(i, f), Active: i == page})
+		links = append(links, pageLink{Label: strconv.Itoa(i), URL: urlOf(i), Active: i == page})
 	}
 	if end < total {
 		if end < total-1 {
 			links = append(links, pageLink{Label: "…", Disabled: true})
 		}
-		links = append(links, pageLink{Label: strconv.Itoa(total), URL: pageURL(total, f)})
+		links = append(links, pageLink{Label: strconv.Itoa(total), URL: urlOf(total)})
 	}
-	links = append(links, pageLink{Label: "»", URL: pageURL(page+1, f), Disabled: page >= total})
+	links = append(links, pageLink{Label: "»", URL: urlOf(page + 1), Disabled: page >= total})
 	return links
 }
 

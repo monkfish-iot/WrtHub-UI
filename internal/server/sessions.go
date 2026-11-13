@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -12,28 +13,51 @@ import (
 	"wrthub-ui/internal/frpsclient"
 )
 
-// 在线会话页首屏/轮询最多展示条数
-const sessionsPageSize = 50
+const (
+	// 在线会话页默认每页条数与上限
+	sessionsDefaultPageSize = 50
+	sessionsMaxPageSize     = 200
+)
 
 // sessionsPage 是在线会话页视图（5 秒自动刷新；支持下线操作）。
 type sessionsPage struct {
 	pageBase
-	Sessions []frpsclient.RadiusSessionItem
-	Total    int
-	Err      string
-	FlashOK  string
-	FlashErr string
+	Sessions   []frpsclient.RadiusSessionItem
+	Total      int
+	Page       int
+	PageSize   int
+	TotalPages int
+	Keyword    string
+	Pages      []pageLink
+	Err        string
+	FlashOK    string
+	FlashErr   string
 	// 页脚提示：当前超时阈值、认证源与超时是否向上游补发 Stop
 	Timeout       int
 	AuthSource    string
 	StopOnTimeout bool
 }
 
+// sessionsQuery 解析在线会话页的分页与关键字参数（页面与轮询 JSON 共用）。
+func sessionsQuery(c *gin.Context) (page, pageSize int, keyword string) {
+	page = atoiDefault(c.Query("page"), 1)
+	pageSize = atoiDefault(c.Query("page_size"), sessionsDefaultPageSize)
+	if pageSize > sessionsMaxPageSize {
+		pageSize = sessionsMaxPageSize
+	}
+	keyword = strings.TrimSpace(c.Query("keyword"))
+	return page, pageSize, keyword
+}
+
 // handleSessionsPage 渲染在线会话页（主菜单「在线会话」）。
 func (a *App) handleSessionsPage(c *gin.Context) {
 	u, _ := auth.CurrentUser(c)
+	page, pageSize, keyword := sessionsQuery(c)
 	pg := sessionsPage{
 		pageBase: pageBase{ActiveMenu: "sessions", CurrentUser: u, Config: a.Cfg},
+		Page:     page,
+		PageSize: pageSize,
+		Keyword:  keyword,
 		Timeout:  radDefaultSessionTimeout,
 		FlashOK:  c.Query("ok"),
 		FlashErr: c.Query("err"),
@@ -50,7 +74,7 @@ func (a *App) handleSessionsPage(c *gin.Context) {
 		pg.StopOnTimeout = cfg.UpstreamStopOnTimeout
 	}
 
-	res, err := a.Frps.ListRadiusSessions(c.Request.Context(), 1, sessionsPageSize, "")
+	res, err := a.Frps.ListRadiusSessions(c.Request.Context(), page, pageSize, keyword)
 	if err != nil {
 		a.Log.Error("list radius sessions failed", "err", err)
 		pg.Err = "获取活跃记账会话失败：" + err.Error()
@@ -59,14 +83,23 @@ func (a *App) handleSessionsPage(c *gin.Context) {
 		pg.Total = res.Total
 	}
 
+	pg.TotalPages = (pg.Total + pageSize - 1) / pageSize
+	if pg.TotalPages < 1 {
+		pg.TotalPages = 1
+	}
+	pg.Pages = buildPager(page, pg.TotalPages, func(n int) string {
+		return sessionsPageURL(n, pageSize, keyword)
+	})
+
 	if rerr := a.Render.Render(c.Writer, "pages/sessions/index", pg); rerr != nil {
 		a.Log.Error("render sessions page failed", "err", rerr)
 	}
 }
 
-// handleSessionsData 供在线会话页轮询（只读 JSON）。
+// handleSessionsData 供在线会话页轮询（只读 JSON，支持分页与关键字）。
 func (a *App) handleSessionsData(c *gin.Context) {
-	res, err := a.Frps.ListRadiusSessions(c.Request.Context(), 1, sessionsPageSize, "")
+	page, pageSize, keyword := sessionsQuery(c)
+	res, err := a.Frps.ListRadiusSessions(c.Request.Context(), page, pageSize, keyword)
 	if err != nil {
 		a.Log.Error("list radius sessions failed", "err", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
@@ -76,6 +109,19 @@ func (a *App) handleSessionsData(c *gin.Context) {
 		res = &frpsclient.RadiusSessionListResult{}
 	}
 	c.JSON(http.StatusOK, res)
+}
+
+// sessionsPageURL 构造在线会话分页链接（保留每页条数与关键字）。
+func sessionsPageURL(n, pageSize int, keyword string) string {
+	q := url.Values{}
+	if keyword != "" {
+		q.Set("keyword", keyword)
+	}
+	if pageSize != sessionsDefaultPageSize {
+		q.Set("page_size", strconv.Itoa(pageSize))
+	}
+	q.Set("page", strconv.Itoa(n))
+	return "/sessions?" + q.Encode()
 }
 
 // handleSessionDrop 强制下线在线会话（POST /sessions/drop）。
@@ -88,8 +134,29 @@ func (a *App) handleSessionDrop(c *gin.Context) {
 	nas := strings.TrimSpace(c.PostForm("nas"))          // NAS-Identifier = device_id
 	acctSID := strings.TrimSpace(c.PostForm("acct_sid")) // Acct-Session-Id
 	back := "/sessions"
-	okMsg := func(msg string) { c.Redirect(http.StatusFound, back+"?ok="+url.QueryEscape(msg)) }
-	errMsg := func(msg string) { c.Redirect(http.StatusFound, back+"?err="+url.QueryEscape(msg)) }
+	// 保留当前分页与关键字，下线后回到同一视图
+	backQuery := url.Values{}
+	if kw := strings.TrimSpace(c.PostForm("keyword")); kw != "" {
+		backQuery.Set("keyword", kw)
+	}
+	if p := atoiDefault(c.PostForm("page"), 1); p > 1 {
+		backQuery.Set("page", strconv.Itoa(p))
+	}
+	if size := atoiDefault(c.PostForm("page_size"), sessionsDefaultPageSize); size != sessionsDefaultPageSize {
+		backQuery.Set("page_size", strconv.Itoa(size))
+	}
+	if len(backQuery) > 0 {
+		back += "?" + backQuery.Encode()
+	}
+	redirectWith := func(key, msg string) {
+		sep := "?"
+		if strings.Contains(back, "?") {
+			sep = "&"
+		}
+		c.Redirect(http.StatusFound, back+sep+key+"="+url.QueryEscape(msg))
+	}
+	okMsg := func(msg string) { redirectWith("ok", msg) }
+	errMsg := func(msg string) { redirectWith("err", msg) }
 
 	if nas == "" || acctSID == "" {
 		errMsg("缺少必要参数（nas / acct_sid）")
